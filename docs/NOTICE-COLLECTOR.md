@@ -39,7 +39,7 @@ There is no insecure TLS fallback. Startup rejects missing/wrong CA configuratio
 
 1. Set `NOTICE_INGEST_SECRET` using `npx wrangler secret put NOTICE_INGEST_SECRET`, then deploy (`npm run deploy`) with `NOTICE_COLLECTION_MODE = "external"` in `wrangler.toml`. Keep the existing D1 and Queue; do not create replacement resources or reset source baselines.
 2. Generate a dedicated random shared secret locally, for example `openssl rand -hex 32`. Do not paste it into chat, Git or a shell command argument. Set the same value as Worker secret `NOTICE_INGEST_SECRET` and GitHub repository Actions secret `NOTICE_INGEST_SECRET`. This secret permits submission of notices and must remain private.
-3. Set GitHub Actions secret `NOTICE_INGEST_URL` to the exact HTTPS production URL:
+3. Set GitHub Actions **variable** `NOTICE_INGEST_URL` to the exact HTTPS production URL (an Actions secret with the same name also works; the variable takes precedence):
 
    ```text
    https://<your-worker>.workers.dev/internal/notices
@@ -58,7 +58,7 @@ For an explicitly approved local upload, securely load the endpoint and shared s
 npm run notices:collect -- --send
 ```
 
-Cloudflare's stored secret is not automatically available to this local Node process. Prefer the Actions secret mechanism. Unset local secret variables when finished.
+Cloudflare's stored secret is not automatically available to this local Node process. Keep `NOTICE_INGEST_SECRET` in Actions secrets; the endpoint URL can use Actions variables. Unset local secret variables when finished.
 
 ## Authentication, bounded retries and idempotency
 

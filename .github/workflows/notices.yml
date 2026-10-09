@@ -20,7 +20,16 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Collect and submit six official notice boards
-        run: npm run notices:collect -- --send
+        run: |
+          if [[ -z "$NOTICE_INGEST_URL" ]]; then
+            echo "::error::Set the Actions variable NOTICE_INGEST_URL (or a secret with the same name)."
+            exit 1
+          fi
+          if [[ -z "$NOTICE_INGEST_SECRET" ]]; then
+            echo "::error::Set the Actions secret NOTICE_INGEST_SECRET to match the Worker secret."
+            exit 1
+          fi
+          npm run notices:collect -- --send
         env:
-          NOTICE_INGEST_URL: ${{ secrets.NOTICE_INGEST_URL }}
+          NOTICE_INGEST_URL: ${{ vars.NOTICE_INGEST_URL || secrets.NOTICE_INGEST_URL }}
           NOTICE_INGEST_SECRET: ${{ secrets.NOTICE_INGEST_SECRET }}
