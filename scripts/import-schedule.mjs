@@ -24,5 +24,6 @@ const statements = schedules.map(item => {
   const data = { ...item, active };
   return `INSERT INTO schedules (id, data, active) VALUES (${quote(item.id)}, ${quote(JSON.stringify(data))}, ${active ? 1 : 0}) ON CONFLICT(id) DO UPDATE SET data=excluded.data, active=excluded.active;`;
 });
-await writeFile(resolve(output), `-- Generated locally; ${approved ? 'review approved' : 'NOT approved for notifications'}. Never deletes absent IDs.\nBEGIN TRANSACTION;\n${statements.join('\n')}\nCOMMIT;\n`);
+// Remote D1 import provides its own transaction and rejects explicit BEGIN/COMMIT.
+await writeFile(resolve(output), `-- Generated locally; ${approved ? 'review approved' : 'NOT approved for notifications'}. Never deletes absent IDs.\n${statements.join('\n')}\n`);
 console.log(`Wrote ${schedules.length} schedules to ${output}; notifications ${approved ? 'approved (faculty deadlines excluded)' : 'disabled'}. No database command was executed.`);
