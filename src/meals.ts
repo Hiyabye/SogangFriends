@@ -46,7 +46,7 @@ async function apiJson(url:string,options:RequestInit,timeout:number,limit:numbe
   for(;;){const {done,value}=await reader.read();if(done)break;size+=value.length;if(size>limit){await reader.cancel();throw new Error('Model response too large');}body+=decoder.decode(value,{stream:true});}body+=decoder.decode();return JSON.parse(body);
  }finally{clearTimeout(timer);}
 }
-function modelPrices(metadata:Record<string,unknown>,reservation:number) {
+function freeModelPrices(metadata:Record<string,unknown>) {
  const pricing=object(metadata.pricing);
  const price=(name:string,required=false)=>{
   const value=pricing[name];
@@ -54,31 +54,29 @@ function modelPrices(metadata:Record<string,unknown>,reservation:number) {
   if((typeof value!=='string'&&typeof value!=='number')||String(value).trim()===''||!Number.isFinite(Number(value))||Number(value)<0)throw new Error('Invalid model pricing');
   return Number(value);
  };
- const prompt=price('prompt',true),completion=price('completion',true),image=price('image'),request=price('request');
- // Unsupported charges (audio, search, reasoning add-ons, etc.) cannot be budgeted safely.
- for(const key of Object.keys(pricing))if(!['prompt','completion','image','request'].includes(key)&&price(key)!==0)throw new Error('Unsupported additional model pricing');
- // Conservative estimate, NOT a mathematical image-token or billing ceiling. Set an OpenRouter
- // API-key credit limit as the hard boundary. max_price units: tokens per million; image/request USD.
- // https://openrouter.ai/docs/guides/routing/provider-selection#max-price
- const estimate=32768*prompt+6000*completion+image+request;
- if(!Number.isFinite(reservation)||reservation<=0||estimate>reservation)throw new Error('Configured model exceeds conservative call reservation');
- return {prompt:prompt*1_000_000,completion:completion*1_000_000,image,request};
+ price('prompt',true); price('completion',true);
+ // A :free suffix alone is insufficient: every published charge must also be zero.
+ for(const key of Object.keys(pricing))if(price(key)!==0)throw new Error('Only zero-price free models are permitted');
+ return {prompt:0,completion:0,image:0,request:0};
 }
 export async function extractMeal(env:Env,image:{bytes:Uint8Array;mime:string},expected:Expected):Promise<{week:MealWeek;actualCost:number|null;model:string}> {
  if(!env.OPENROUTER_API_KEY||env.LLM_ENABLED!=='true')throw new MealExtractionError('Meal extraction disabled or key missing');
  if(image.bytes.length===0||image.bytes.length>5*1024*1024||!['image/jpeg','image/png'].includes(image.mime))throw new MealExtractionError('Invalid model image');
- const model=env.MEAL_MODEL??'qwen/qwen3-vl-32b-instruct';
- let maxPrice:ReturnType<typeof modelPrices>;
+ const model=env.MEAL_MODEL??'google/gemma-4-31b-it:free';
+ if(!model.endsWith(':free'))throw new MealExtractionError('Only :free OpenRouter models are permitted');
+ let maxPrice:ReturnType<typeof freeModelPrices>;
+ let responseFormat:unknown;
  try {
   const catalog=object(await apiJson('https://openrouter.ai/api/v1/models',{},20_000,4*1024*1024));
   const entry=Array.isArray(catalog.data)?catalog.data.find((r:unknown)=>object(r).id===model):undefined;
   if(!entry)throw new Error('Configured model not listed');const metadata=object(entry);const arch=object(metadata.architecture);const parameters=metadata.supported_parameters;
-  if(!Array.isArray(arch.input_modalities)||!arch.input_modalities.includes('image')||!Array.isArray(parameters)||!parameters.includes('structured_outputs')||!parameters.includes('response_format'))throw new Error('Configured model lacks required vision or structured output support');
-  maxPrice=modelPrices(metadata,Number(env.LLM_MAX_CALL_USD??'0.25'));
+  if(!Array.isArray(arch.input_modalities)||!arch.input_modalities.includes('image')||!Array.isArray(parameters)||!parameters.includes('response_format'))throw new Error('Configured model lacks required vision or JSON output support');
+  responseFormat=parameters.includes('structured_outputs')?{type:'json_schema',json_schema:{name:'bellarmine_week',strict:true,schema:MEAL_SCHEMA}}:{type:'json_object'};
+  maxPrice=freeModelPrices(metadata);
  }catch(error){throw new MealExtractionError(error instanceof MealExtractionError?error.message:error instanceof Error?error.message:'Model metadata failed',null,true,error instanceof MealExtractionError?error.retryAfter:undefined);}
  let actualCost:number|null=null;
  try {
-  const result=object(await apiJson('https://openrouter.ai/api/v1/chat/completions',{method:'POST',headers:{Authorization:`Bearer ${env.OPENROUTER_API_KEY}`,'Content-Type':'application/json'},body:JSON.stringify({model,provider:{require_parameters:true,max_price:maxPrice},temperature:0,max_tokens:6000,response_format:{type:'json_schema',json_schema:{name:'bellarmine_week',strict:true,schema:MEAL_SCHEMA}},messages:[{role:'user',content:[{type:'text',text:PROMPT},{type:'image_url',image_url:{url:`data:${image.mime};base64,${base64(image.bytes)}`}}]}]})},120_000,512*1024));
+  const result=object(await apiJson('https://openrouter.ai/api/v1/chat/completions',{method:'POST',headers:{Authorization:`Bearer ${env.OPENROUTER_API_KEY}`,'Content-Type':'application/json'},body:JSON.stringify({model,provider:{require_parameters:true,max_price:maxPrice},temperature:0,max_tokens:6000,response_format:responseFormat,messages:[{role:'user',content:[{type:'text',text:`${PROMPT}\nRequired JSON schema (also applies in JSON mode): ${JSON.stringify(MEAL_SCHEMA)}`},{type:'image_url',image_url:{url:`data:${image.mime};base64,${base64(image.bytes)}`}}]}]})},120_000,512*1024));
   const usage=result.usage&&typeof result.usage==='object'&&!Array.isArray(result.usage)?result.usage as Record<string,unknown>:{};
   actualCost=typeof usage.cost==='number'&&Number.isFinite(usage.cost)&&usage.cost>=0?usage.cost:null;
   if(!Array.isArray(result.choices)||result.choices.length!==1)throw new Error('Invalid model choices');const choice=object(result.choices[0]);const answer=object(choice.message);

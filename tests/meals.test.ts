@@ -2,8 +2,8 @@ import {describe,it,expect,vi,afterEach} from 'vitest';
 import {validateMeal,reusableMeal,formatMeal,extractMeal,MealExtractionError} from '../src/meals';
 import type {Env} from '../src/types';
 const expected={start:'2026-10-12',end:'2026-10-18',published:'2026-10-08'};
-const metadata=()=>({id:'custom/model',architecture:{input_modalities:['text','image']},supported_parameters:['structured_outputs','response_format'],pricing:{prompt:'0.0000003',completion:'0.0000025',image:'0',request:'0'}});
-const env={LLM_ENABLED:'true',OPENROUTER_API_KEY:'fixture',MEAL_MODEL:'custom/model'} as Env;
+const metadata=()=>({id:'custom/model:free',architecture:{input_modalities:['text','image']},supported_parameters:['structured_outputs','response_format'],pricing:{prompt:'0',completion:'0',image:'0',request:'0'}});
+const env={LLM_ENABLED:'true',OPENROUTER_API_KEY:'fixture',MEAL_MODEL:'custom/model:free'} as Env;
 const image={bytes:new Uint8Array([255,216,255]),mime:'image/jpeg'};
 const unknown=()=>({status:'unknown',items:[],time:null,evidence:''});
 const sample=()=>({start:expected.start,end:expected.end,certain:true,days:Array.from({length:7},(_,i)=>({date:`2026-10-${12+i}`,weekday:i+1,breakfastKorean:unknown(),breakfastWestern:unknown(),breakfastCommon:unknown(),cupRice:unknown(),dinner:unknown(),drinks:unknown()}))});
@@ -18,7 +18,26 @@ describe('strict observed meal validation',()=>{
  it('does not show expired cached meal as current',()=>{const w=validateMeal(sample(),expected);expect(formatMeal(w,'2026-10-19','https://school.example')).toBe('2026-10-19 식단 확인 불가\n원문: <https://school.example>');});
  it('reuses only same image, version, source and period',()=>{const id={image_hash:'abc',version:'v1',source_url:'https://school.example',start_date:expected.start,end_date:expected.end};expect(reusableMeal(id,id)).toBe(true);for(const field of Object.keys(id))expect(reusableMeal(id,{...id,[field]:'changed'})).toBe(false);});
  it('missing API key does not call external services',async()=>{const fetcher=vi.fn();vi.stubGlobal('fetch',fetcher);await expect(extractMeal({LLM_ENABLED:'true'} as Env,{bytes:new Uint8Array([1]),mime:'image/jpeg'},expected)).rejects.toThrow('key missing');expect(fetcher).not.toHaveBeenCalled();});
- it('checks model metadata, sends inline image and strict schema with bounded tokens',async()=>{const fetcher=vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({data:[metadata()]}))).mockResolvedValueOnce(new Response(JSON.stringify({model:'custom/model',choices:[{finish_reason:'stop',message:{content:JSON.stringify(sample())}}],usage:{cost:0.003}})));vi.stubGlobal('fetch',fetcher);const r=await extractMeal({LLM_ENABLED:'true',OPENROUTER_API_KEY:'fixture-key',MEAL_MODEL:'custom/model'} as Env,{bytes:new Uint8Array([255,216,255]),mime:'image/jpeg'},expected);expect(r.actualCost).toBe(.003);const body=JSON.parse(fetcher.mock.calls[1][1].body);expect(body.max_tokens).toBe(6000);expect(body.provider.require_parameters).toBe(true);expect(body.provider.max_price).toEqual({prompt:.3,completion:2.5,image:0,request:0});expect(body.response_format.json_schema.strict).toBe(true);expect(body.messages[0].content[1].image_url.url).toBe('data:image/jpeg;base64,/9j/');expect(body.messages[0].content[0].text).not.toContain(expected.start);});
+ it('checks free metadata, sends inline image and strict schema with zero-price routing',async()=>{
+  const fetcher=vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({data:[metadata()]}))).mockResolvedValueOnce(new Response(JSON.stringify({model:'custom/model:free',choices:[{finish_reason:'stop',message:{content:JSON.stringify(sample())}}],usage:{cost:0}})));
+  vi.stubGlobal('fetch',fetcher);const r=await extractMeal(env,image,expected);expect(r.actualCost).toBe(0);
+  const body=JSON.parse(fetcher.mock.calls[1][1].body);expect(body.max_tokens).toBe(6000);expect(body.provider.require_parameters).toBe(true);
+  expect(body.provider.max_price).toEqual({prompt:0,completion:0,image:0,request:0});expect(body.response_format.json_schema.strict).toBe(true);
+  expect(body.messages[0].content[1].image_url.url).toBe('data:image/jpeg;base64,/9j/');expect(body.messages[0].content[0].text).not.toContain(expected.start);
+ });
+ it('rejects paid model IDs before any network call even if pricing might be zero',async()=>{
+  const fetcher=vi.fn();vi.stubGlobal('fetch',fetcher);
+  await expect(extractMeal({...env,MEAL_MODEL:'custom/model'},image,expected)).rejects.toThrow('Only :free');expect(fetcher).not.toHaveBeenCalled();
+ });
+ it('uses Gemma default JSON mode with explicit schema prompt and unchanged semantic validation',async()=>{
+  const free={...metadata(),id:'google/gemma-4-31b-it:free',supported_parameters:['response_format']};
+  const response=(content:string)=>new Response(JSON.stringify({choices:[{finish_reason:'stop',message:{content}}],usage:{cost:0}}));
+  const fetcher=vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({data:[free]}))).mockResolvedValueOnce(response(JSON.stringify(sample())));vi.stubGlobal('fetch',fetcher);
+  await extractMeal({...env,MEAL_MODEL:undefined},image,expected);const body=JSON.parse(fetcher.mock.calls[1][1].body);
+  expect(body.model).toBe(free.id);expect(body.response_format).toEqual({type:'json_object'});expect(body.messages[0].content[0].text).toContain('breakfastKorean');
+  vi.stubGlobal('fetch',vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({data:[free]}))).mockResolvedValueOnce(response(JSON.stringify({...sample(),certain:false}))));
+  await expect(extractMeal({...env,MEAL_MODEL:undefined},image,expected)).rejects.toThrow('output rejected');
+ });
  it('caps maximum valid menus while preserving the complete original link and labels',()=>{
   const x=sample() as any;
   for(const key of ['breakfastKorean','breakfastWestern','dinner','cupRice']) x.days[0][key]={status:'available',items:Array(20).fill('메뉴😀'.repeat(25)),time:key==='cupRice'?'11:40':null,evidence:'10/12 메뉴 11:40'};
@@ -34,9 +53,9 @@ describe('strict observed meal validation',()=>{
    const error=await extractMeal(env,image,expected).catch(e=>e);expect(error).toBeInstanceOf(MealExtractionError);expect(error.safeRetry).toBe(true);expect(error.actualCost).toBeNull();expect(fetcher).toHaveBeenCalledTimes(1);
   }
  });
- it('includes image and request pricing in conservative reservation',async()=>{
+ it('rejects any image or request charge even with free text pricing',async()=>{
   const fetcher=vi.fn(async()=>new Response(JSON.stringify({data:[{...metadata(),pricing:{prompt:'0',completion:'0',image:'.2',request:'.1'}}]})));vi.stubGlobal('fetch',fetcher);
-  await expect(extractMeal(env,image,expected)).rejects.toThrow('reservation');expect(fetcher).toHaveBeenCalledTimes(1);
+  await expect(extractMeal(env,image,expected)).rejects.toThrow('Only zero-price');expect(fetcher).toHaveBeenCalledTimes(1);
  });
  it('preserves available cost for rejected dates, invalid JSON, refusal and missing choices',async()=>{
   for(const response of [
@@ -59,5 +78,5 @@ describe('strict observed meal validation',()=>{
   vi.stubGlobal('fetch',vi.fn().mockRejectedValue(new Error('network')));
   const error=await extractMeal(env,image,expected).catch(e=>e);expect(error).toBeInstanceOf(MealExtractionError);expect(error.safeRetry).toBe(true);expect(error.actualCost).toBeNull();
  });
- it('rejects configured model without image/structured output support',async()=>{vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify({data:[{id:'custom/model',architecture:{input_modalities:['text']},supported_parameters:[]}]}))));await expect(extractMeal({LLM_ENABLED:'true',OPENROUTER_API_KEY:'fixture',MEAL_MODEL:'custom/model'} as Env,{bytes:new Uint8Array([1]),mime:'image/jpeg'},expected)).rejects.toThrow('lacks required');});
+ it('rejects free model without image or JSON output support',async()=>{vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify({data:[{...metadata(),architecture:{input_modalities:['text']},supported_parameters:[]}]}))));await expect(extractMeal(env,image,expected)).rejects.toThrow('lacks required');});
 });

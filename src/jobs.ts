@@ -57,7 +57,7 @@ export async function executeJob(env:Env,job:Job) {
  const info=await discoverMeal();
  await env.DB.prepare("INSERT INTO health(id,last_attempt,last_success,source_url,error) VALUES('meal-discovery',?,?,?,NULL) ON CONFLICT(id) DO UPDATE SET last_attempt=excluded.last_attempt,last_success=excluded.last_success,source_url=excluded.source_url,error=NULL").bind(nowIso(),nowIso(),info.url).run();
  const image=await fetchImage(info.imageUrl);
- const version=env.PROCESSING_VERSION??'meal-v1';
+ const version=env.PROCESSING_VERSION??'meal-v2-free';
  const key=`${image.hash}:${version}:${info.start}:${info.end}:${info.url}`;
  const cached=await env.DB.prepare('SELECT cache_key FROM meals WHERE cache_key=?').bind(key).first();
  if(cached) await env.DB.prepare('UPDATE meals SET verified_at=? WHERE cache_key=?').bind(nowIso(),key).run();

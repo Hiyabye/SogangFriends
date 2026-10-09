@@ -5,7 +5,7 @@
 ## 구현 범위
 
 - 공식 네 게시판 목록 직접 수집, 안정 ID 저장, 최초 baseline, 새 공지 묶음 발송, 제목/링크 갱신.
-- 공식 벨라르미노 게시물/이미지 발견, SHA-256 캐시, OpenRouter image + strict JSON schema, 관측 날짜/요일/기간/운영 근거 검증. 만료 식단을 오늘 식단으로 대체하지 않음.
+- 공식 벨라르미노 게시물/이미지 발견, SHA-256 캐시, OpenRouter 무료 모델 image + JSON 출력(지원 모델에는 strict JSON schema), 관측 날짜/요일/기간/운영 근거 검증. 만료 식단을 오늘 식단으로 대체하지 않음.
 - 공식 학사 일정 27개 초기 자료(2026-09–2027-02), `/schedule` 30일 조회. 사용자 검토·승인 전 자동 알림 비활성. 날짜만 있는 마감에 시각을 만들지 않음.
 - `/meal [date]`, `/notices [source]`, `/schedule`, `/setup`, `/status`. 조회는 저장 데이터만 사용하며 HTTP 명령에서 직접 LLM을 호출하지 않음. 모든 명령을 먼저 defer, Queue가 원래 응답을 편집.
 - guild별 채널 설정, Manage Guild 관리 권한, 비공개 관리 응답, 서버 allowlist, 채널 소속/최종 권한 검증, raw Ed25519 서명 검증, 멘션 차단.
@@ -100,19 +100,21 @@ Cron은 15분마다 실행. `SOURCE_INTERVAL_HOURS=6`의 bucket마다 게시판�
 
 ## 4. OpenRouter 비용·정확성 설정
 
-https://openrouter.ai/settings/keys 에서 이 앱 전용 키를 만들고 **키 credit limit**을 설정하세요. 사전에 유료 호출 승인이 필요합니다.
+**OpenRouter는 무료 모델만 사용합니다. 유료 모델 및 유료 fallback은 금지합니다.** https://openrouter.ai/settings/keys 에서 이 앱 전용 키를 만드세요. 코드가 `:free` 접미사와 카탈로그의 모든 과금 항목이 0인지 확인하고, provider 가격 상한도 0으로 설정합니다. 조건 불일치 시 호출하지 않습니다. 키 credit limit도 추가 방어로 설정하세요.
 
-- `MEAL_MODEL`: 기본 `qwen/qwen3-vl-32b-instruct`. 현재 public metadata상 image + structured_outputs + response_format 지원; 실제 식단 OCR 성능은 아직 검증하지 않았습니다.
+무료 요청 한도는 모든 계정에 무조건 1000회/일이 아닙니다. 현재 공식 안내는 기본 50회/일, $10 이상 credit 구매 시 1000회/일, 20회/분입니다. 계정의 실제 한도를 확인하세요. 한도를 늘리려는 credit 구매는 사용자 판단이며 봇은 credit 잔액이 있더라도 유료 모델을 사용하지 않습니다. [공식 안내](https://openrouter.ai/docs/api/reference/limits)
+
+- `MEAL_MODEL`: 기본 `google/gemma-4-31b-it:free`. 현재 public metadata상 image + response_format 지원, structured_outputs 미지원이므로 JSON mode 사용. schema는 prompt에 명시하고 코드 의미 검증은 동일하게 유지합니다. 무료 모델이 structured_outputs를 지원하면 strict schema로 요청합니다. 실제 식단 OCR 성능은 아직 검증하지 않았습니다.
 - `LLM_ENABLED=true`로 켜기 전 이미지 결과를 검토하세요. false/키 누락은 공지·일정·저장 식단 조회를 막지 않습니다.
 - `LLM_DAILY_CALLS=2`, `LLM_DAILY_BUDGET_USD=0.50`, `LLM_MAX_CALL_USD=0.25`.
-- 마지막 값은 **호출당 보수적 예약액**, 하드 청구 상한이 아닙니다. D1이 일일 호출 수/예약액을 원자적으로 제한하고 unknown/실패 비용을 환급하지 않습니다. 실제 비용이 제공되면 거부된 메뉴에도 기록하고 이후 호출을 차단합니다.
-- 모델 카탈로그의 가격을 검사: 입력 32768 token 가정 + 출력6000 + 이미지/요청 가격이 예약액을 넘으면 거부, 미지원 추가 요금도 거부. provider max_price는 단가 제한입니다. Vision token량을 수학적으로 보장하지 못하므로 **OpenRouter 키 credit limit이 최종 경계**입니다.
-- 모델 지원/가격 metadata 변경은 fail-closed. 모델 선택은 무료 하나에 고정하지 않습니다. 추가 과금 차원이 있는 모델은 해당 가격 계산을 구현하기 전 자동 사용하지 않습니다.
+- 마지막 값은 기존 D1 예산 회로의 **호출당 보수적 예약액**으로 유지하며 예상 청구액이 아닙니다. 무료 모델의 확인된 단가는 0입니다. 기본 자동 추출은 하루 2개 작업으로 충분하며 1000회 한도를 소진하려는 설정이 아닙니다. unknown/실패 사용량은 환급하지 않고, 응답에 비용이 있다면 메뉴가 거부돼도 기록합니다.
+- prompt/completion 가격은 필수 확인, image/request와 기타 공개 과금 항목도 모두 0이어야 합니다. `provider.max_price`도 0으로 요청합니다. 가격 또는 지원 metadata 변경은 fail-closed.
+- 다른 무료 모델로 설정할 수 있지만 이미지 입력과 JSON 출력은 필수입니다. `:free`가 아닌 모델·자동 모델 선택 router·유료 대체 경로는 사용하지 않습니다.
 - 이미지 최대5MiB, PNG/JPEG magic 검증; HTTP 응답 최대512KiB, inference120초, output6000 token. 이미지 byte 제한은 있지만 decoded pixel 제한은 아직 없습니다.
 - exact image SHA256 + 처리 버전 + 공식 post URL + 기간이면 기존 결과 사용. `PROCESSING_VERSION`은 prompt/schema/검증 변경 시 올립니다.
 - 관측 날짜/요일 중복·누락·범위 충돌, 불확실 출력 거부. 공백은 미운영이 아니라 unknown. 컵밥은 해당 날짜 메뉴 근거가 있어야만 표시; 시간은 원문 근거일 때만 표시.
-- 모델에는 inline image와 추출 지시만 제공하고 임의 URL/Discord 관리 도구를 주지 않습니다.
-- 최초 추출은 사용자 검토 후 활성화하세요. JSON schema와 evidence는 정확성을 증명하지 않습니다.
+- 모델에는 inline image·JSON schema·추출 지시만 제공하고 임의 URL/Discord 관리 도구를 주지 않습니다.
+- 최초 추출은 사용자 검토 후 활성화하세요. JSON mode/schema와 evidence는 정확성을 증명하지 않습니다.
 
 현재 수동 수정/승인 UI와 arbitrary menu override는 제공하지 않습니다. 이상한 정상 결과는 해당 D1 캐시를 비공개로 격리하고 원문을 확인해야 합니다. 검토 데이터 자동 적용은 다음 버전에서 post URL/hash/기간에 묶인 형식으로 추가합니다.
 
@@ -166,6 +168,21 @@ npx wrangler d1 execute sogang-friends --remote --command="SELECT day,state,rese
 수집은 최대 대학50개/컴퓨팅3페이지/식단2페이지, 게시물 본문 대량 수집 없음. 상세 수집은 식단 이미지 발견에만 필요. HTML/JSON2MiB, timeout20초, redirects 거부, 요청 간격1초. pacer는 isolate-local이므로 queue concurrency=1을 유지하세요; global 다중 배포 수집을 지원하는 distributed pacer는 없음.
 
 본부 서버는 Node live 검증에서 중간 인증서 누락 때문에 `UNABLE_TO_VERIFY_LEAF_SIGNATURE`가 있었고 공용 intermediate CA를 추가하면 성공했습니다. **TLS 검증을 끄지 않았습니다.** Worker staging에서 실제 실패하는지는 아직 확인하지 않았습니다. 배포 승인 후 키 없이 공지 수집부터 제한 검증하세요. Workers에서도 실패한다면 원인을 다시 확인하고 **이 새 저장소 자체의 Actions 수집기 + 검증된 CA** 도입을 논의해야 합니다. 해당 fallback은 아직 구현하지 않았고 기존 Actions를 연결하지 않습니다.
+
+## 공지 전체 이력 저장 — 가능성 및 현재 구현 경계
+
+현재 `notices`는 `(source,id)` 복합 기본 키로 **수집한 목록을 누적 보관**하며 오래된 row를 삭제하지 않습니다. 학교 학사는 공식 `pkId`, 컴퓨팅은 `/detail/<숫자 ID>`를 사용합니다. 서로 다른 게시판의 같은 숫자는 충돌하지 않습니다. 식단 게시물은 공식 `pkid`가 있고, 메뉴는 적용 날짜로 구분합니다. 현재 `meals`는 날짜 범위와 7일 JSON을 원본 URL/이미지 해시/처리 버전별로 저장합니다. 날짜만으로 revision을 덮어쓰지 않습니다.
+
+**과거 전체 페이지 backfill은 아직 구현되지 않았습니다.** 현재 수집 창은 최근 목록에 한정됩니다. 현재 TypeScript + Workers + Queues + D1 구성으로 전체 이력 수집이 가능하고, 별도 서비스나 기술 스택 교체는 필요하지 않습니다.
+
+권장 다음 단계(미구현):
+1. 최근 목록 baseline을 먼저 확정하고, 관리자 승인으로만 과거 목록 backfill 시작.
+2. 페이지 하나씩 Queue 작업으로 수집하며 cursor/종료 상태를 D1에 저장. 요청 간격·응답 제한·전체 page/request 예산을 유지하고 중단 후 재개.
+3. backfill은 알림을 생성하지 않는 별도 저장 경로 사용. 이미 저장된 `(source,id)`는 UPSERT. 일상 polling은 최근 창만 수집하고 사용자 조회는 항상 D1을 읽음.
+4. `archive_runs` 등의 cursor migration 추가를 권장. 공지 본문 없이 제목/게시일/링크를 보관하는 데 현재 `notices` 스키마 변경은 필수 아님. first_seen/last_verified 필드는 운영 개선용으로 추가 가능.
+5. 날짜별 식단 검색/전체 이력을 확장하면 `meal_sources(post_id,source_url,...)`, `meal_days(source,date,revision,...)`와 원본 revision 관계를 명시하는 migration을 권장. 이미지 원본 파일까지 보관하려면 D1 blob이 아니라 R2 추가를 검토.
+
+전체 이력은 공식 사이트에 현재 공개된 범위만 회수할 수 있습니다. 한 번 backfill했다고 학교 요청이 영원히 0이 되지는 않습니다. 새 글·제목/링크 수정·식단 이미지 교체를 찾으려면 제한된 주기적 재확인이 필요합니다. 모든 과거 페이지를 매 갱신마다 다시 읽지 않는 것이 핵심입니다. 이 확장은 수집 범위와 저장 형식에 영향을 주므로 별도 승인 후 구현합니다.
 
 ## 검증과 남은 제한
 

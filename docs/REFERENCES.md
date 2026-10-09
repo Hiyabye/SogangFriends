@@ -17,7 +17,9 @@ Official APIs/documentation:
 - https://openrouter.ai/docs/guides/routing/provider-selection#max-price
 - https://openrouter.ai/api/v1/models
 
-Public model metadata checked, not OCR quality. Default qwen/qwen3-vl-32b-instruct currently advertises image input + structured_outputs + response_format and budgetable pricing. Routing requires parameter support. Metadata is rechecked before each extraction; changes fail closed. Other models remain configurable but unsupported additional charge dimensions are conservatively blocked.
+Public model metadata checked, not OCR quality. Free-only policy: default google/gemma-4-31b-it:free currently advertises image input + response_format, but not structured_outputs. Use JSON mode with schema in prompt and unchanged runtime semantic validation; strict schema remains preferred for supporting free models. Every configured ID must end in :free and all published prices must be zero; provider max_price is also zero. Metadata is rechecked before each extraction; changes fail closed. No paid fallback.
+
+Free quota reference: https://openrouter.ai/docs/api/reference/limits — verify account limits; 1000/day is conditional, not universal. Current public guidance reports 50/day by default and 1000/day after at least $10 of credit purchase, with 20/minute for free models.
 
 Limited source live checks: Computing first pages, Bellarmine list/article/image, university API, academic calendar. University Node fetch required an added public intermediate CA; no TLS bypass. Native Workers compatibility is not proven until an approved staging deployment. Current direct official snapshots were also parsed offline. Synthetic test fixtures are newly written, not copied menu images/content archives.
 

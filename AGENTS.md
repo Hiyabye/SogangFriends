@@ -7,6 +7,7 @@
 - References are read-only and unlicensed; write original code. Never depend on old feeds/services/settings.
 - Preserve official IDs, last-good timestamps, initial notice baseline, KST date-only semantics.
 - Unknown Discord POST outcome is uncertain, not a retry. Idempotent webhook PATCH can retry.
+- OpenRouter free models only: require :free ID, verified zero prices and zero-price routing. No paid fallback. Use strict schema when supported, otherwise JSON mode plus the same semantic validation.
 - AI JSON validity is not factual accuracy; require observed dates/weekdays and evidence. No fixed cup-rice weekday rules.
 - D1 conditional claims/unique keys protect duplicate deliveries. Test SQL using SQLite and external calls with fixtures.
 - Never log tokens, webhook payloads, source authors, or full upstream error bodies. Keep admin replies ephemeral.
