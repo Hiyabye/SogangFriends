@@ -1,0 +1,38 @@
+name = "sogang-friends-bot"
+main = "src/worker.ts"
+compatibility_date = "2026-10-09"
+workers_dev = true
+
+[triggers]
+crons = ["*/15 * * * *"]
+
+[vars]
+DISCORD_APPLICATION_ID = "REPLACE_APPLICATION_ID"
+DISCORD_PUBLIC_KEY = "REPLACE_PUBLIC_KEY"
+ALLOWED_GUILDS = "REPLACE_GUILD_ID"
+SOURCE_INTERVAL_HOURS = "6"
+MEAL_TIME_KST = "07:30"
+MEAL_MODEL = "qwen/qwen3-vl-32b-instruct"
+PROCESSING_VERSION = "meal-v1"
+LLM_ENABLED = "false"
+LLM_DAILY_CALLS = "2"
+LLM_DAILY_BUDGET_USD = "0.50"
+LLM_MAX_CALL_USD = "0.25"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "sogang-friends"
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"
+
+[[queues.producers]]
+binding = "JOBS"
+queue = "sogang-jobs"
+
+[[queues.consumers]]
+queue = "sogang-jobs"
+max_batch_size = 1
+max_batch_timeout = 1
+max_concurrency = 1
+max_retries = 3
+dead_letter_queue = "sogang-jobs-dlq"

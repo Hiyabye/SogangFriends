@@ -1,0 +1,13 @@
+PRAGMA foreign_keys = ON;
+CREATE TABLE guilds (id TEXT PRIMARY KEY, notices_channel TEXT, meals_channel TEXT, schedule_channel TEXT, updated_at TEXT NOT NULL);
+CREATE TABLE sources (id TEXT PRIMARY KEY, initialized INTEGER NOT NULL DEFAULT 0, last_success TEXT, last_attempt TEXT, error TEXT, lease_owner TEXT, lease_until TEXT);
+CREATE TABLE notices (source TEXT NOT NULL, id TEXT NOT NULL, title TEXT NOT NULL, published TEXT NOT NULL, url TEXT NOT NULL, collected_at TEXT NOT NULL, PRIMARY KEY(source,id));
+CREATE TABLE meals (cache_key TEXT PRIMARY KEY, source_url TEXT NOT NULL, image_hash TEXT NOT NULL, version TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT NOT NULL, data TEXT NOT NULL, extracted_at TEXT NOT NULL, verified_at TEXT NOT NULL, model TEXT NOT NULL);
+CREATE TABLE schedules (id TEXT PRIMARY KEY, data TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE jobs (id TEXT PRIMARY KEY, kind TEXT NOT NULL, payload TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, available_at TEXT NOT NULL, lease_until TEXT, error TEXT);
+CREATE INDEX jobs_due ON jobs(state,available_at);
+CREATE TABLE deliveries (id TEXT PRIMARY KEY, guild_id TEXT NOT NULL, channel_id TEXT NOT NULL, content TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending', message_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, expires_at TEXT NOT NULL, error TEXT);
+CREATE INDEX deliveries_state ON deliveries(state);
+CREATE TABLE llm_usage (id TEXT PRIMARY KEY, day TEXT NOT NULL, reserved_usd REAL NOT NULL, actual_usd REAL, state TEXT NOT NULL, created_at TEXT NOT NULL);
+CREATE INDEX llm_usage_day ON llm_usage(day);
+CREATE TABLE health (id TEXT PRIMARY KEY, last_attempt TEXT, last_success TEXT, error TEXT);
