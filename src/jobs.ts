@@ -61,7 +61,7 @@ export async function executeJob(env:Env,job:Job) {
  const key=`${image.hash}:${version}:${info.start}:${info.end}:${info.url}`;
  const cached=await env.DB.prepare('SELECT cache_key FROM meals WHERE cache_key=?').bind(key).first();
  if(cached) await env.DB.prepare('UPDATE meals SET verified_at=? WHERE cache_key=?').bind(nowIso(),key).run();
- else await enqueue(env,`extract:${key}`,'meal-extract',{...info,hash:image.hash,version,key});
+ else if(env.LLM_ENABLED==='true'&&env.OPENROUTER_API_KEY) await enqueue(env,`extract:${key}`,'meal-extract',{...info,hash:image.hash,version,key});
  break;
  }
  case 'meal-extract': {
@@ -117,7 +117,11 @@ export async function consume(env:Env,batch:MessageBatch<{id:string}>) {
  else await executeJob(env,job);
  await env.DB.prepare("UPDATE jobs SET state='done',lease_until=NULL,error=NULL WHERE id=? AND state='running'").bind(job.id).run();
  } catch(error) {
- if(job.kind==='meal-discover') await env.DB.prepare("INSERT INTO health(id,last_attempt,error) VALUES('meal-discovery',?,'meal source collection failed') ON CONFLICT(id) DO UPDATE SET last_attempt=excluded.last_attempt,error=excluded.error").bind(nowIso()).run();
+ // These jobs contain only public source data; never log interaction tokens or model requests.
+ if(job.kind==='collect'||job.kind==='meal-discover') console.error('Source job failed',job.kind,error);
+ const sourceError=(job.kind==='collect'||job.kind==='meal-discover')?(error instanceof Error?error.message.slice(0,300):'source job failed'):null;
+ if(job.kind==='collect') await env.DB.prepare('UPDATE sources SET error=? WHERE id=?').bind(sourceError,JSON.parse(job.payload).source).run();
+ if(job.kind==='meal-discover') await env.DB.prepare("INSERT INTO health(id,last_attempt,error) VALUES('meal-discovery',?,?) ON CONFLICT(id) DO UPDATE SET last_attempt=excluded.last_attempt,error=excluded.error").bind(nowIso(),sourceError).run();
  // No automatic billable replay or webhook replay after ambiguous outcomes.
  if(job.kind==='meal-extract' && error instanceof MealExtractionError && error.actualCost!==null) await env.DB.prepare("UPDATE llm_usage SET actual_usd=?,state='rejected' WHERE id=?").bind(error.actualCost,job.id).run();
  if(job.kind==='meal-extract' && error instanceof MealExtractionError && error.safeRetry) {
@@ -128,7 +132,7 @@ export async function consume(env:Env,batch:MessageBatch<{id:string}>) {
  } else if(job.kind==='meal-extract') {
  await env.DB.prepare("UPDATE jobs SET state='needs_review',lease_until=NULL,error=? WHERE id=?").bind(job.kind==='meal-extract'?'meal extraction blocked/failed; inspect source and budget':'interaction failed',job.id).run();
  if(job.kind==='meal-extract') await env.DB.prepare("INSERT INTO health(id,last_attempt,error) VALUES('meal',?,'extraction blocked/failed') ON CONFLICT(id) DO UPDATE SET last_attempt=excluded.last_attempt,error=excluded.error").bind(nowIso()).run();
- } else await retryJob(env,job,'job failed',(error as {retryAfter?:number})?.retryAfter??Math.min(3600,60*2**job.attempts));
+ } else await retryJob(env,job,sourceError??'job failed',(error as {retryAfter?:number})?.retryAfter??Math.min(3600,60*2**job.attempts));
  }
  // Tokens persist only while waiting; clear after any terminal interaction attempt.
  if(job.kind==='interaction') await env.DB.prepare("UPDATE jobs SET payload='{}' WHERE id=? AND state IN ('done','failed','needs_review')").bind(job.id).run();

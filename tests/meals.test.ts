@@ -21,9 +21,15 @@ describe('strict observed meal validation',()=>{
  it('checks free metadata, sends inline image and strict schema with zero-price routing',async()=>{
   const fetcher=vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({data:[metadata()]}))).mockResolvedValueOnce(new Response(JSON.stringify({model:'custom/model:free',choices:[{finish_reason:'stop',message:{content:JSON.stringify(sample())}}],usage:{cost:0}})));
   vi.stubGlobal('fetch',fetcher);const r=await extractMeal(env,image,expected);expect(r.actualCost).toBe(0);
+  expect(fetcher.mock.calls[0][1].redirect).toBe('manual');expect(fetcher.mock.calls[1][1].redirect).toBe('manual');
   const body=JSON.parse(fetcher.mock.calls[1][1].body);expect(body.max_tokens).toBe(6000);expect(body.provider.require_parameters).toBe(true);
   expect(body.provider.max_price).toEqual({prompt:0,completion:0,image:0,request:0});expect(body.response_format.json_schema.strict).toBe(true);
   expect(body.messages[0].content[1].image_url.url).toBe('data:image/jpeg;base64,/9j/');expect(body.messages[0].content[0].text).not.toContain(expected.start);
+ });
+ it('does not follow catalog redirects or attempt inference after redirect rejection',async()=>{
+  const fetcher=vi.fn().mockResolvedValue(new Response(null,{status:302,headers:{location:'https://example.com/untrusted'}}));vi.stubGlobal('fetch',fetcher);
+  await expect(extractMeal(env,image,expected)).rejects.toThrow('Model service HTTP 302');expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(fetcher.mock.calls[0][1].redirect).toBe('manual');
  });
  it('rejects paid model IDs before any network call even if pricing might be zero',async()=>{
   const fetcher=vi.fn();vi.stubGlobal('fetch',fetcher);

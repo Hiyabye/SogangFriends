@@ -92,9 +92,11 @@ npx wrangler secret put OPENROUTER_API_KEY
 npm run deploy
 ```
 
+일정 SQL에는 명시적 `BEGIN TRANSACTION`/`COMMIT`을 넣지 마세요. 원격 D1 import가 자체 transaction을 제공하며 explicit BEGIN은 거부합니다. 로컬 Wrangler는 이를 제거해 처리하므로 로컬 성공만으로 원격 성공을 판단하지 마세요. 입력 뒤 `SELECT COUNT(*) AS total, SUM(active) AS approved FROM schedules`로 결과를 확인하세요(기본 seed: 27 / 0).
+
 Wrangler account 선택 및 Queues 요금/retention은 현재 계정 정책을 확인하세요. consumer batch=1/concurrency=1, durable claim도 적용. DLQ는 별도 queue, 자동 POST 재발송 용도가 아닙니다. Worker가 자동 생성한 과거 봇 리소스에 연결되지 않았는지 배포 출력 확인.
 
-Cron은 15분마다 실행. `SOURCE_INTERVAL_HOURS=6`의 bucket마다 게시판별 수집과 식단 발견. 재배포는 baseline을 초기화하지 않습니다. 첫 수집에서는 기존 공지를 저장하고 발송하지 않습니다. 다운타임은 공지 bounded window(최대 3페이지) 안에서만 복구하며 전체 이력을 보장하지 않습니다.
+Cron은 15분마다 실행. `/status`의 `식단·Cron`에서 `id=cron`의 `last_attempt`/`last_success`/`error`로 계획 단계 실행을 확인합니다. Cloudflare Cron 변경은 전파에 최대 15분이 걸릴 수 있습니다. Cron row가 없으면 handler가 DB에 실행 시작을 기록하지 않은 상태이며, 학교 사이트 오류와 구분해야 합니다. `SOURCE_INTERVAL_HOURS=6`의 bucket마다 게시판별 수집과 식단 발견. 재배포는 baseline을 초기화하지 않습니다. 첫 수집에서는 기존 공지를 저장하고 발송하지 않습니다. 다운타임은 공지 bounded window(최대 3페이지) 안에서만 복구하며 전체 이력을 보장하지 않습니다.
 
 `MEAL_TIME_KST=07:30` 기준 현재 15분 window 안에서만 하루 식단/마감 작업을 생성합니다. 놓친 일일 작업은 다음 날 몰아 보내지 않습니다. 이미 생성된 식단/마감 delivery도 해당 KST 날짜가 지나면 `expired`; 공지는 intent 생성 전후 모두 최대 24시간만 유효합니다.
 

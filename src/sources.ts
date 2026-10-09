@@ -31,7 +31,7 @@ export async function sourceBytes(url: string, limit=2*1024*1024): Promise<{byte
  const u = new URL(url); if (u.protocol !== 'https:' || !hosts.has(u.hostname) || u.username || u.password || u.port || u.hash) throw new Error('Disallowed source URL');
  await pace(); const controller = new AbortController(); const timer=setTimeout(()=>controller.abort(),20_000);
  try {
-  const response=await fetch(url,{redirect:'error',signal:controller.signal,headers:{'User-Agent':'SogangFriendsBot/0.1 (bounded official-source collector)'}});
+  const response=await fetch(url,{redirect:'manual',signal:controller.signal,headers:{'User-Agent':'SogangFriendsBot/0.1 (bounded official-source collector)'}});
   if (!response.ok || !response.body) {
    const error=new Error(`Source HTTP ${response.status}`) as Error & {retryAfter?:number};
    if(response.status===429){const seconds=Number(response.headers.get('retry-after'));error.retryAfter=Number.isFinite(seconds)&&seconds>0?Math.min(86400,seconds):60;}
@@ -114,7 +114,11 @@ export function parseMealImage(input:string,article:{url:string;start:string;end
 function validateImageUrl(url:string):void {const u=new URL(url);if(u.origin!=='https://scc.sogang.ac.kr'||!/^\/dataview\/board\/1185\/[^/]+\.(?:png|jpe?g)$/i.test(u.pathname)||u.search||u.hash||u.username||u.password)throw new Error('Disallowed meal image');}
 export async function discoverMeal():Promise<{url:string;imageUrl:string;published:string;start:string;end:string}> {
  const today=new Date(Date.now()+9*3600000).toISOString().slice(0,10);const candidates=[];
- for(let page=1;page<=2;page++){const u=new URL(MEAL_SOURCE_URL);u.searchParams.set('currentPage',String(page));candidates.push(...parseMealList(await html(u.href)));}
+ for(let page=1;page<=2;page++){
+  const u=new URL(MEAL_SOURCE_URL);u.searchParams.set('currentPage',String(page));candidates.push(...parseMealList(await html(u.href)));
+  // Unrelated older partial-week posts must not block a validated current week's menu.
+  if(candidates.some(a=>a.start<=today&&a.end>=today)) break;
+ }
  // Prefer today's applicable post; otherwise expose newest known source without pretending it is today's menu.
  const sorted=candidates.sort((a,b)=>b.published.localeCompare(a.published));const chosen=sorted.find(a=>a.start<=today&&a.end>=today)??sorted[0];
  return {...chosen,imageUrl:parseMealImage(await html(chosen.url),chosen)};

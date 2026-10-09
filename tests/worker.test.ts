@@ -1,6 +1,6 @@
 import {afterEach, describe, expect, it, vi} from 'vitest';
 import {testDatabase} from './helpers/db';
-import {handleRequest, completeInteraction} from '../src/worker';
+import worker, {handleRequest, completeInteraction} from '../src/worker';
 import {consume} from '../src/jobs';
 import {enqueue, recover, saveNotices} from '../src/storage';
 import {MealExtractionError} from '../src/meals';
@@ -17,6 +17,51 @@ async function signed(env:any,body:any) {
 }
 const interaction=(name:string,guild='111',permissions='32')=>({id:'123',application_id:'777',token:'secret-webhook',type:2,guild_id:guild,member:{permissions,user:{id:'private-user'}},data:{name}});
 describe('interaction and durable integration',()=>{
+ it('records Cron planning and creates first collection jobs without awaiting a six-hour interval',async()=>{
+  const db=testDatabase();try {
+   const event={scheduledTime:Date.parse('2026-10-09T14:45:00Z')} as ScheduledController;
+   await worker.scheduled(event,db.env);
+   const health=db.sqlite.prepare("SELECT last_attempt,last_success,error FROM health WHERE id='cron'").get()!;
+   expect(health.last_attempt).toBeTruthy();expect(health.last_success).toBeTruthy();expect(health.error).toBeNull();
+   expect(db.sqlite.prepare("SELECT COUNT(*) AS n FROM jobs WHERE kind='collect'").get()!.n).toBe(4);
+   expect(db.sqlite.prepare("SELECT COUNT(*) AS n FROM jobs WHERE kind='meal-discover'").get()!.n).toBe(1);
+   expect(db.env.JOBS.send).toHaveBeenCalledTimes(5);
+   await worker.scheduled(event,db.env);
+   expect(db.sqlite.prepare('SELECT COUNT(*) AS n FROM jobs').get()!.n).toBe(5);
+  } finally {db.close();}
+ });
+ it('discovers meals while disabled without blocking a later enabled extraction',async()=>{
+  const db=testDatabase();try {
+   vi.spyOn(await import('../src/sources'),'discoverMeal').mockResolvedValue({url:'https://scc.sogang.ac.kr/front/cmsboardview.do?pkid=123',imageUrl:'https://scc.sogang.ac.kr/dataview/board/1185/synthetic.jpg',published:'2026-10-08',start:'2026-10-12',end:'2026-10-18'});
+   await enqueue(db.env,'discovery-disabled','meal-discover',{});
+   await consume(db.env,{messages:[{body:{id:'discovery-disabled'},ack:vi.fn()}]} as any);
+   expect(db.sqlite.prepare("SELECT COUNT(*) AS n FROM jobs WHERE kind='meal-extract'").get()!.n).toBe(0);
+   expect(db.sqlite.prepare("SELECT last_success FROM health WHERE id='meal-discovery'").get()!.last_success).toBeTruthy();
+   db.env.LLM_ENABLED='true';db.env.OPENROUTER_API_KEY='fixture';
+   await enqueue(db.env,'discovery-enabled','meal-discover',{});
+   await consume(db.env,{messages:[{body:{id:'discovery-enabled'},ack:vi.fn()}]} as any);
+   expect(db.sqlite.prepare("SELECT state FROM jobs WHERE kind='meal-extract'").get()!.state).toBe('pending');
+  } finally {db.close();}
+ });
+ it('retains public source failure details without logging interaction or inference payloads',async()=>{
+  const db=testDatabase();try {
+   vi.spyOn(console,'error').mockImplementation(()=>{});
+   vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response('',{status:403}));
+   await enqueue(db.env,'source-failure','collect',{source:'university'});
+   await consume(db.env,{messages:[{body:{id:'source-failure'},ack:vi.fn()}]} as any);
+   expect(db.sqlite.prepare("SELECT error FROM jobs WHERE id='source-failure'").get()!.error).toBe('Source HTTP 403');
+   expect(db.sqlite.prepare("SELECT error FROM sources WHERE id='university'").get()!.error).toBe('Source HTTP 403');
+  } finally {db.close();}
+ });
+ it('records failed Cron dispatch without claiming successful planning',async()=>{
+  const db=testDatabase();try {
+   vi.spyOn(console,'error').mockImplementation(()=>{});
+   vi.mocked(db.env.JOBS.send).mockRejectedValueOnce(new Error('queue unavailable'));
+   await expect(worker.scheduled({scheduledTime:Date.parse('2026-10-09T14:45:00Z')} as ScheduledController,db.env)).rejects.toThrow('queue unavailable');
+   const health=db.sqlite.prepare("SELECT last_attempt,last_success,error FROM health WHERE id='cron'").get()!;
+   expect(health.last_attempt).toBeTruthy();expect(health.last_success).toBeNull();expect(health.error).toContain('Cron planning failed');
+  } finally {db.close();}
+ });
  it('rejects bad signatures; responds to signed PING without bot/model keys',async()=>{
  const db=testDatabase();try{
  expect((await handleRequest(new Request('https://bot.test/interactions',{method:'POST',body:'{}'}),db.env)).status).toBe(401);
