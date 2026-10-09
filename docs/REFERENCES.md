@@ -12,6 +12,8 @@ Official APIs/documentation:
 - https://developers.cloudflare.com/queues/reference/delivery-guarantees/
 - https://developers.cloudflare.com/queues/platform/limits/
 - https://developers.cloudflare.com/d1/worker-api/d1-database/
+- https://developers.cloudflare.com/workers/runtime-apis/nodejs/https/ — `ca` unsupported; Node compatibility does not add custom CA support to Workers fetch.
+- https://developers.cloudflare.com/queues/configuration/batching-retries/ — per-message delayed `retry` used for accepted notice snapshots.
 - https://openrouter.ai/blog/tutorials/send-image-to-llm/
 - https://openrouter.ai/docs/guides/features/structured-outputs
 - https://openrouter.ai/docs/guides/routing/provider-selection#max-price
@@ -21,6 +23,8 @@ Public model metadata checked, not OCR quality. Free-only policy: default google
 
 Free quota reference: https://openrouter.ai/docs/api/reference/limits — verify account limits; 1000/day is conditional, not universal. Current public guidance reports 50/day by default and 1000/day after at least $10 of credit purchase, with 20/minute for free models.
 
-Limited source live checks: Computing first pages, Bellarmine list/article/image, university API, academic calendar. University Node fetch required an added public intermediate CA; no TLS bypass. Native Workers compatibility is not proven until an approved staging deployment. Current direct official snapshots were also parsed offline. Synthetic test fixtures are newly written, not copied menu images/content archives.
+Limited source live checks: Computing first pages, Bellarmine list/article/image, university API, academic calendar. University Node fetch required an added public intermediate CA; no TLS bypass. Production direct Workers collection is now verified for Computing and Bellarmine; the university origin yields HTTP 526. Follow-up Playwright inspection covered the six supplied pages and their official identities. The project-owned Node collector with the verified Sectigo intermediate succeeded on all six; this does not establish production ingestion or Actions execution. Current direct official snapshots were also parsed offline. Synthetic test fixtures are newly written, not copied menu images/content archives.
+
+Certificate follow-up: reference README's [bundle explanation](https://github.com/Hiyabye/sogang-notices/blob/5d53d9575c3f92ef2f36d39cecc2c8a406e5be64/README.md#why-a-certificate-bundle-is-included) accurately identifies missing intermediates. Only the relevant public CA was independently obtained from the issuer and cryptographically verified; see [certificate provenance](../certificates/README.md). No runtime dependency on that repository or its infrastructure was added.
 
 School content/image reproduction permission is not established. Bot links to originals and limits collection to lists and one necessary image; do not redistribute source images or expand crawling without checking terms. npm dependencies retain their own license notices; no license grant over referenced code is claimed.

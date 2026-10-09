@@ -1,0 +1,26 @@
+name: collect notices
+on:
+  schedule:
+    - cron: '10 */6 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: notice-collector
+  cancel-in-progress: false
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Collect and submit six official notice boards
+        run: npm run notices:collect -- --send
+        env:
+          NOTICE_INGEST_URL: ${{ secrets.NOTICE_INGEST_URL }}
+          NOTICE_INGEST_SECRET: ${{ secrets.NOTICE_INGEST_SECRET }}

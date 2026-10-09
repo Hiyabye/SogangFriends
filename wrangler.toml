@@ -11,6 +11,8 @@ DISCORD_APPLICATION_ID = "REPLACE_APPLICATION_ID"
 DISCORD_PUBLIC_KEY = "REPLACE_PUBLIC_KEY"
 ALLOWED_GUILDS = "REPLACE_GUILD_ID"
 SOURCE_INTERVAL_HOURS = "6"
+# Six-board Node collector supplies authenticated snapshots; Worker Cron remains for meals/schedules.
+NOTICE_COLLECTION_MODE = "external"
 MEAL_TIME_KST = "07:30"
 # Only :free models with verified zero pricing are permitted.
 MEAL_MODEL = "google/gemma-4-31b-it:free"

@@ -6,6 +6,15 @@ afterEach(()=>{vi.unstubAllGlobals();vi.restoreAllMocks();});
 describe('official source adapters with synthetic fixtures',()=>{
  it('uses official ID, sorts by publication not pinned position',()=>{const n=parseUniversity(JSON.parse(fixture('university.json')));expect(n.map(x=>x.id)).toEqual(['11','10']);expect(n[0].url).toBe('https://www.sogang.ac.kr/ko/detail/11?bbsConfigFk=2');});
  it('rejects invalid dates, duplicate IDs, config mismatch and malformed empty data',()=>{const f=JSON.parse(fixture('university.json'));f.data.list[0].regDate='20260230090000';expect(()=>parseUniversity(f)).toThrow();const d=JSON.parse(fixture('university.json'));d.data.list[1].pkId=10;expect(()=>parseUniversity(d)).toThrow();expect(()=>parseUniversity({statusCode:200,data:{list:[],total:4,pageNum:1}})).toThrow();expect(()=>parseUniversity({statusCode:200,data:{list:[{pkId:1,configId:3,regDate:'20261001000000',isTop:'N',title:'Wrong'}],total:1,pageNum:1}})).toThrow();});
+ it('supports the graduate and news boards with independent IDs and strict board identity',()=>{
+  for(const [id,heading] of [['graduateNotice','대학원 공지'],['news','소식']]){
+   const source=SOURCES.find(s=>s.id===id)!;
+   const html=fixture('computing.html').replaceAll('academicNotice',id).replaceAll('학사 공지',heading);
+   const parsed=parseComputing(html,source);expect(parsed.notices[0].source).toBe(id);
+   expect(parsed.notices[0].url).toBe(`https://computing.sogang.ac.kr/ko/community/${id}/detail/1`);
+   expect(parsed.regularIds).toEqual(['2']);expect(()=>parseComputing(html,SOURCES[1])).toThrow();
+  }
+ });
  it('normalizes computing links and separates pins from regular rows',()=>{const p=parseComputing(fixture('computing.html'),SOURCES[1]);expect(p.regularIds).toEqual(['2']);expect(p.notices[0].url).not.toContain('?');expect(()=>parseComputing(fixture('computing.html'),SOURCES[2])).toThrow();});
  it('rejects filtered/foreign/malformed computing pages',()=>{const h=fixture('computing.html');expect(()=>parseComputing(h.replace('>전체<','>컴퓨터공학과<'),SOURCES[1])).toThrow();expect(()=>parseComputing(h.replace('/detail/2?','/detail/1?'),SOURCES[1])).toThrow();expect(()=>parseComputing('<html>login</html>',SOURCES[1])).toThrow();expect(()=>parseComputing(h.replace('2026.10.08','2026.02.30'),SOURCES[1])).toThrow();});
  it('finds CMS article via full-title comment and validates image path and post identity',()=>{const a=parseMealList(fixture('meal-list.html'))[0];expect(a.start).toBe('2026-10-12');expect(parseMealImage(fixture('meal-article.html'),a)).toBe('https://scc.sogang.ac.kr/dataview/board/1185/synthetic.jpg');expect(()=>parseMealImage(fixture('meal-article.html').replace('value="123"','value="124"'),a)).toThrow();expect(()=>parseMealImage(fixture('meal-article.html').replace('/board/1185/','/board/999/'),a)).toThrow();});

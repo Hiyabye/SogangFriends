@@ -20,7 +20,7 @@ export async function planCron(env:Env,scheduledTime:number) {
  const hours=Number(env.SOURCE_INTERVAL_HOURS??'6');
  const interval=(Number.isFinite(hours)&&hours>=1?hours:6)*3600_000;
  const slot=Math.floor(scheduledTime/interval);
- for(const source of SOURCES) await enqueue(env,`collect:${source.id}:${slot}`,'collect',{source:source.id});
+ if(env.NOTICE_COLLECTION_MODE!=='external') for(const source of SOURCES) await enqueue(env,`collect:${source.id}:${slot}`,'collect',{source:source.id});
  await enqueue(env,`meal-discover:${slot}`,'meal-discover',{});
  const date=todayKst(new Date(scheduledTime));
  const hhmm=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(scheduledTime));
@@ -40,7 +40,13 @@ async function recipients(env:Env,field:'notices_channel'|'meals_channel'|'sched
 export async function executeJob(env:Env,job:Job) {
  const payload=JSON.parse(job.payload);
  switch(job.kind) {
+ case 'notice-snapshot': {
+ if(Date.now()-Date.parse(job.created_at)>30*60_000)throw new Error('Notice snapshot expired');
+ await saveNotices(env,payload.source,payload.notices,nowIso());
+ break;
+ }
  case 'collect': {
+ if(env.NOTICE_COLLECTION_MODE==='external')break;
  const source=SOURCES.find(s=>s.id===payload.source); if(!source) throw new Error('unknown source');
  try {const rows=await collectNotices(source);await saveNotices(env,source.id,rows,nowIso());}
  catch(error) {await sourceFailure(env,source.id);throw error;} break;
@@ -112,15 +118,16 @@ export async function consume(env:Env,batch:MessageBatch<{id:string}>) {
  for(const msg of batch.messages) {
  const job=await claim(env,msg.body.id);
  if(!job){msg.ack();continue;}
+ let snapshotRetry:number|undefined;
  try {
  if(job.kind==='interaction') {const {completeInteraction}=await import('./worker');await completeInteraction(env,job);}
  else await executeJob(env,job);
  await env.DB.prepare("UPDATE jobs SET state='done',lease_until=NULL,error=NULL WHERE id=? AND state='running'").bind(job.id).run();
  } catch(error) {
  // These jobs contain only public source data; never log interaction tokens or model requests.
- if(job.kind==='collect'||job.kind==='meal-discover') console.error('Source job failed',job.kind,error);
- const sourceError=(job.kind==='collect'||job.kind==='meal-discover')?(error instanceof Error?error.message.slice(0,300):'source job failed'):null;
- if(job.kind==='collect') await env.DB.prepare('UPDATE sources SET error=? WHERE id=?').bind(sourceError,JSON.parse(job.payload).source).run();
+ if(job.kind==='collect'||job.kind==='notice-snapshot'||job.kind==='meal-discover') console.error('Source job failed',job.kind,error);
+ const sourceError=(job.kind==='collect'||job.kind==='notice-snapshot'||job.kind==='meal-discover')?(error instanceof Error?error.message.slice(0,300):'source job failed'):null;
+ if(job.kind==='collect'||job.kind==='notice-snapshot') await env.DB.prepare('UPDATE sources SET error=? WHERE id=?').bind(sourceError,JSON.parse(job.payload).source).run();
  if(job.kind==='meal-discover') await env.DB.prepare("INSERT INTO health(id,last_attempt,error) VALUES('meal-discovery',?,?) ON CONFLICT(id) DO UPDATE SET last_attempt=excluded.last_attempt,error=excluded.error").bind(nowIso(),sourceError).run();
  // No automatic billable replay or webhook replay after ambiguous outcomes.
  if(job.kind==='meal-extract' && error instanceof MealExtractionError && error.actualCost!==null) await env.DB.prepare("UPDATE llm_usage SET actual_usd=?,state='rejected' WHERE id=?").bind(error.actualCost,job.id).run();
@@ -132,11 +139,18 @@ export async function consume(env:Env,batch:MessageBatch<{id:string}>) {
  } else if(job.kind==='meal-extract') {
  await env.DB.prepare("UPDATE jobs SET state='needs_review',lease_until=NULL,error=? WHERE id=?").bind(job.kind==='meal-extract'?'meal extraction blocked/failed; inspect source and budget':'interaction failed',job.id).run();
  if(job.kind==='meal-extract') await env.DB.prepare("INSERT INTO health(id,last_attempt,error) VALUES('meal',?,'extraction blocked/failed') ON CONFLICT(id) DO UPDATE SET last_attempt=excluded.last_attempt,error=excluded.error").bind(nowIso()).run();
- } else await retryJob(env,job,sourceError??'job failed',(error as {retryAfter?:number})?.retryAfter??Math.min(3600,60*2**job.attempts));
+ } else if(job.kind==='notice-snapshot'&&Date.now()-Date.parse(job.created_at)>30*60_000) {
+ await env.DB.prepare("UPDATE jobs SET state='failed',lease_until=NULL,error='Notice snapshot expired' WHERE id=?").bind(job.id).run();
+ } else {
+ const delay=(error as {retryAfter?:number})?.retryAfter??Math.min(3600,60*2**job.attempts);
+ await retryJob(env,job,sourceError??'job failed',delay);
+ // Caught snapshot failures schedule their own retry rather than waiting for Cron.
+ if(job.kind==='notice-snapshot'&&job.attempts<3)snapshotRetry=Math.min(86400,Math.max(1,Math.ceil(delay)));
+ }
  }
  // Tokens persist only while waiting; clear after any terminal interaction attempt.
  if(job.kind==='interaction') await env.DB.prepare("UPDATE jobs SET payload='{}' WHERE id=? AND state IN ('done','failed','needs_review')").bind(job.id).run();
- msg.ack();
+ if(snapshotRetry===undefined)msg.ack();else msg.retry({delaySeconds:snapshotRetry});
  }
  await dispatch(env);
 }

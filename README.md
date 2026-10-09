@@ -4,7 +4,7 @@
 
 ## 구현 범위
 
-- 공식 네 게시판 목록 직접 수집, 안정 ID 저장, 최초 baseline, 새 공지 묶음 발송, 제목/링크 갱신.
+- 공식 6개 게시판(학교 학사공지, 소프트웨어융합대학 학사·대학원·대외정보·소식·취업) 수집. 독립 Node 수집기 + 이 프로젝트의 GitHub Actions가 HTTPS 목록을 읽고, 인증된 snapshot을 Worker에 전달. 안정 ID 저장, 최초 baseline, 새 공지 묶음 발송, 제목/링크 갱신. [공지 수집 설정](docs/NOTICE-COLLECTOR.md)
 - 공식 벨라르미노 게시물/이미지 발견, SHA-256 캐시, OpenRouter 무료 모델 image + JSON 출력(지원 모델에는 strict JSON schema), 관측 날짜/요일/기간/운영 근거 검증. 만료 식단을 오늘 식단으로 대체하지 않음.
 - 공식 학사 일정 27개 초기 자료(2026-09–2027-02), `/schedule` 30일 조회. 사용자 검토·승인 전 자동 알림 비활성. 날짜만 있는 마감에 시각을 만들지 않음.
 - `/meal [date]`, `/notices [source]`, `/schedule`, `/setup`, `/status`. 조회는 저장 데이터만 사용하며 HTTP 명령에서 직접 LLM을 호출하지 않음. 모든 명령을 먼저 defer, Queue가 원래 응답을 편집.
@@ -19,16 +19,18 @@
 src/worker.ts    HTTP 검증·defer·명령·ephemeral 응답
 src/jobs.ts      Cron 계획 / Queue 소비 / 수집·추출·발송 분리
 src/storage.ts   D1 원자 claim·baseline·outbox·예산
-src/sources.ts   공식 목록·식단 발견·이미지 제한 다운로드 (parse5)
+src/sources.ts   Node/Worker 공통 공식 목록 parser·식단 발견 (parse5)
+src/notice-ingest.ts 공지 snapshot HMAC 검증·입력 제한·Queue 접수
 src/meals.ts     OpenRouter 구조화 추출 / 의미 검증 / 표시
 src/time.ts     Asia/Seoul 날짜와 날짜-only 계산
 src/schedule.ts 사람이 검토하는 일정 계약 / 마감 선택
 migrations/     D1 스키마
 data/           일정 JSON과 생성 SQL
-scripts/        명령 등록, 검증된 일정 SQL 생성
+scripts/        명령 등록, 일정 SQL 생성, 독립 Node 공지 수집
+certificates/   서명·지문 검증된 공개 중간 인증서 (Node 수집기 전용)
 ```
 
-하나의 Worker에 fetch/scheduled/queue handler. Queue에는 작업 ID만 넣으며 이미지/토큰을 전달하지 않습니다. D1이 작업 상태 원본이고 Cron이 미발행/누락 pending job을 다시 Queue에 넣습니다. Queue 중복은 D1 claim으로 차단됩니다.
+공지 전용 Node 프로세스와 하나의 Worker에 fetch/scheduled/queue handler. Node는 Discord/OpenRouter/Cloudflare 계정 API 토큰 없이 전용 ingestion key만 사용합니다. Queue에는 작업 ID만 넣으며 이미지/토큰을 전달하지 않습니다. D1이 작업 상태 원본이고 Cron이 미발행/누락 pending job을 다시 Queue에 넣습니다. Queue 중복은 D1 claim으로 차단됩니다.
 
 ## 1. 로컬 개발 (비밀값 불필요)
 
@@ -45,7 +47,7 @@ npx wrangler d1 execute sogang-friends --local --file=data/schedule.sql
 npm run dev -- --test-scheduled
 ```
 
-`wrangler.toml`은 새 리소스용 placeholder 설정입니다. `.env.example`을 참고해 필요시 `.dev.vars`에 로컬 secrets를 작성합니다. 기본 `LLM_ENABLED=false`. `/interactions` 이외 HTTP endpoint는 노출하지 않습니다. 서명 없는 curl은 401이 정상입니다. 로컬 Cron 테스트 `/__scheduled`는 dev 전용이며 **실제 원본 수집을 수행할 수 있으므로** fixture 테스트와 구분하세요. 기본 `npm test`는 외부 요청을 하지 않습니다.
+`wrangler.toml`은 새 리소스용 placeholder 설정입니다. `.env.example`을 참고해 필요시 `.dev.vars`에 로컬 secrets를 작성합니다. 기본 `LLM_ENABLED=false`. Discord는 `/interactions`, 외부 공지 수집기는 HMAC 인증이 필요한 `/internal/notices`를 사용합니다. 외부 수집 모드는 `NOTICE_COLLECTION_MODE=external`; 전용 `NOTICE_INGEST_SECRET` 설정 전 접수는 503입니다. 활성 endpoint에 서명 없는 POST는 401이 정상입니다. 로컬 Cron 테스트 `/__scheduled`는 dev 전용이며 **실제 원본 수집을 수행할 수 있으므로** fixture 테스트와 구분하세요. 기본 `npm test`는 외부 요청을 하지 않습니다.
 
 ## 2. 사용자가 준비할 Discord 설정
 
@@ -71,7 +73,7 @@ unset DISCORD_TOKEN
 
 등록 PUT은 해당 scope의 **전체 명령 목록을 교체**합니다. 자동 등록/자동 배포 CI는 없습니다. 네트워크 실패 시 결과를 확인한 뒤 재실행하세요.
 
-관리자가 Discord에서 `/setup notices:#공지 meals:#식단 schedule:#학사일정` 실행. 옵션 일부만 지정하면 기존 다른 채널을 유지합니다. `/status`는 해당 서버 설정/발송과 공유 수집·작업·예산 상태를 비공개로 표시합니다. 조회 source 값은 `university`, `academicNotice`, `externalInfo`, `career`.
+관리자가 Discord에서 `/setup notices:#공지 meals:#식단 schedule:#학사일정` 실행. 옵션 일부만 지정하면 기존 다른 채널을 유지합니다. `/status`는 해당 서버 설정/발송과 공유 수집·작업·예산 상태를 비공개로 표시합니다. 조회 source 값은 `university`, `academicNotice`, `graduateNotice`, `externalInfo`, `news`, `career`.
 
 ## 3. Cloudflare 준비와 배포
 
@@ -96,7 +98,7 @@ npm run deploy
 
 Wrangler account 선택 및 Queues 요금/retention은 현재 계정 정책을 확인하세요. consumer batch=1/concurrency=1, durable claim도 적용. DLQ는 별도 queue, 자동 POST 재발송 용도가 아닙니다. Worker가 자동 생성한 과거 봇 리소스에 연결되지 않았는지 배포 출력 확인.
 
-Cron은 15분마다 실행. `/status`의 `식단·Cron`에서 `id=cron`의 `last_attempt`/`last_success`/`error`로 계획 단계 실행을 확인합니다. Cloudflare Cron 변경은 전파에 최대 15분이 걸릴 수 있습니다. Cron row가 없으면 handler가 DB에 실행 시작을 기록하지 않은 상태이며, 학교 사이트 오류와 구분해야 합니다. `SOURCE_INTERVAL_HOURS=6`의 bucket마다 게시판별 수집과 식단 발견. 재배포는 baseline을 초기화하지 않습니다. 첫 수집에서는 기존 공지를 저장하고 발송하지 않습니다. 다운타임은 공지 bounded window(최대 3페이지) 안에서만 복구하며 전체 이력을 보장하지 않습니다.
+Cron은 15분마다 실행. `/status`의 `식단·Cron`에서 `id=cron`의 `last_attempt`/`last_success`/`error`로 계획 단계 실행을 확인합니다. Cloudflare Cron 변경은 전파에 최대 15분이 걸릴 수 있습니다. Cron row가 없으면 handler가 DB에 실행 시작을 기록하지 않은 상태이며, 학교 사이트 오류와 구분해야 합니다. `NOTICE_COLLECTION_MODE=external`에서는 공지를 Node/Actions가 수집하고, 기존 직접 수집 작업도 실행하지 않습니다. `worker` 모드(이전 설정의 기본값)에서만 `SOURCE_INTERVAL_HOURS=6`의 bucket마다 게시판을 직접 수집하며, 학교 본부 인증서 체인 문제는 이 모드에서 해결되지 않습니다. 식단 발견은 두 모드 모두 같은 bucket으로 계획합니다. 재배포는 baseline을 초기화하지 않습니다. 첫 수집에서는 기존 공지를 저장하고 발송하지 않습니다. 다운타임은 공지 bounded window(최대 3페이지) 안에서만 복구하며 전체 이력을 보장하지 않습니다.
 
 `MEAL_TIME_KST=07:30` 기준 현재 15분 window 안에서만 하루 식단/마감 작업을 생성합니다. 놓친 일일 작업은 다음 날 몰아 보내지 않습니다. 이미 생성된 식단/마감 delivery도 해당 KST 날짜가 지나면 `expired`; 공지는 intent 생성 전후 모두 최대 24시간만 유효합니다.
 

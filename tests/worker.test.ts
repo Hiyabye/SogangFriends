@@ -23,11 +23,11 @@ describe('interaction and durable integration',()=>{
    await worker.scheduled(event,db.env);
    const health=db.sqlite.prepare("SELECT last_attempt,last_success,error FROM health WHERE id='cron'").get()!;
    expect(health.last_attempt).toBeTruthy();expect(health.last_success).toBeTruthy();expect(health.error).toBeNull();
-   expect(db.sqlite.prepare("SELECT COUNT(*) AS n FROM jobs WHERE kind='collect'").get()!.n).toBe(4);
+   expect(db.sqlite.prepare("SELECT COUNT(*) AS n FROM jobs WHERE kind='collect'").get()!.n).toBe(6);
    expect(db.sqlite.prepare("SELECT COUNT(*) AS n FROM jobs WHERE kind='meal-discover'").get()!.n).toBe(1);
-   expect(db.env.JOBS.send).toHaveBeenCalledTimes(5);
+   expect(db.env.JOBS.send).toHaveBeenCalledTimes(7);
    await worker.scheduled(event,db.env);
-   expect(db.sqlite.prepare('SELECT COUNT(*) AS n FROM jobs').get()!.n).toBe(5);
+   expect(db.sqlite.prepare('SELECT COUNT(*) AS n FROM jobs').get()!.n).toBe(7);
   } finally {db.close();}
  });
  it('discovers meals while disabled without blocking a later enabled extraction',async()=>{

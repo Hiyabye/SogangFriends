@@ -1,6 +1,7 @@
 # Sogang Friends Bot
 
-- One TypeScript Worker: fetch interactions, scheduled planning, durable Queue consumers; D1 is source of truth.
+- One TypeScript Worker plus a standalone Node/GitHub Actions notice collector. Worker handles authenticated snapshots, Discord interactions, scheduled meal/reminder planning and durable Queues; D1 is source of truth.
+- Six-board catalog/parsers are shared. Node TLS stays verified with the single pinned public intermediate; never disable verification or load extra trust material. External collection mode must skip legacy direct collection jobs too.
 - Use npm and commit package-lock.json. Node >=24. Tests use node:sqlite.
 - Commands: npm ci; npm run check; npm audit; npx wrangler deploy --dry-run.
 - Never issue live Discord posts, paid model calls, create Cloudflare resources, register commands, or deploy without user approval.

@@ -17,8 +17,8 @@ function date(value: string): string { const d = value.replaceAll('.', '-'); if 
 function title(value: unknown): string { if (typeof value !== 'string' || !value.trim() || value.length > 1000) throw new Error('Invalid source title'); return value.trim(); }
 const positive = (v: unknown): boolean => /^(?:[1-9]\d*)$/.test(String(v));
 export const SOURCES: Source[] = [
- {id:'university',name:'학교 학사 공지',kind:'university',url:'https://www.sogang.ac.kr/api/api/v1/mainKo/BbsData/boardList?pageNum=1&pageSize=50&bbsConfigFk=2&category=&introPkId=&title=&content=&username='},
- ...[['academicNotice','컴퓨팅대학 학사 공지'],['externalInfo','컴퓨팅대학 대외정보'],['career','컴퓨팅대학 취업·인턴십']].map(([id,name]):Source => ({id,name,kind:'computing',url:`https://computing.sogang.ac.kr/ko/community/${id}/list?num=1`}))
+ {id:'university',name:'서강대학교 학사공지',kind:'university',url:'https://www.sogang.ac.kr/api/api/v1/mainKo/BbsData/boardList?pageNum=1&pageSize=50&bbsConfigFk=2&category=&introPkId=&title=&content=&username='},
+ ...[['academicNotice','소프트웨어융합대학 학사공지'],['graduateNotice','소프트웨어융합대학 대학원공지'],['externalInfo','소프트웨어융합대학 대외정보'],['news','소프트웨어융합대학 소식'],['career','소프트웨어융합대학 취업·인턴십']].map(([id,name]):Source => ({id,name,kind:'computing',url:`https://computing.sogang.ac.kr/ko/community/${id}/list?num=1`}))
 ];
 const hosts = new Set(['www.sogang.ac.kr','computing.sogang.ac.kr','scc.sogang.ac.kr']);
 let pacing: Promise<void> = Promise.resolve(); let lastStart = 0;
@@ -59,7 +59,7 @@ export function parseUniversity(value: unknown, source: Source=SOURCES[0]): Noti
 }
 export function parseComputing(input:string,source:Source): {notices:Notice[];regularIds:string[];regularCount:number} {
  const doc=parse(input); const content=one(doc,n=>cls(n,'board-content')); const header=one(content,n=>cls(n,'board-content-header')); const heading=text(one(header,n=>tag(n,'h2')));
- const expected:Record<string,string>={academicNotice:'학사 공지',externalInfo:'대외정보',career:'취업·인턴십'};
+ const expected:Record<string,string>={academicNotice:'학사 공지',graduateNotice:'대학원 공지',externalInfo:'대외정보',news:'소식',career:'취업·인턴십'};
  if(heading!==expected[source.id])throw new Error('Wrong computing board');
  const active=one(one(doc,n=>cls(n,'board-lnb')),n=>tag(n,'a')&&attr(n,'aria-current')==='page');
  if(new URL(attr(active,'href'),source.url).pathname!==new URL(source.url).pathname)throw new Error('Wrong active board');
