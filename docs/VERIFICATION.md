@@ -58,3 +58,11 @@ User approved original article HTML + attachment/image links (no binaries), all 
 - Raw objects are first captures, not refreshed latest bodies. Historical attachment-layout changes can fail closed. Mutable upstream pagination does not guarantee an immutable snapshot. HTTP200 'not found' payloads are not inferred without verified official semantics.
 - Account free-model quota 1,000/day and 20/minute is recorded from the user's credit-purchase confirmation, not independently authenticated. Meal-specific limits remain unchanged; cross-feature model rate limiting is not implemented in this phase.
 - See [NOTICE-ARCHIVE.md](NOTICE-ARCHIVE.md) for separate activation gates, storage limits and pause/resume.
+
+## Follow-up operational check — 2026-10-10 KST
+
+Read-only verification found scheduled Actions runs `37999910845` and `38028448587` successful; each accepted all six source snapshots. D1 confirmed 18 completed snapshot jobs, 215 accumulated notice rows, six initialized sources with no current errors, and latest collection around 14:43 KST. Cron health recorded success at 19:00 KST; meal discovery succeeded at 15:00 KST. Earlier unconfirmed Cron propagation is therefore no longer an active blocker.
+
+Production remains `LLM_ENABLED=false`: zero extracted meals and zero model reservations are expected, not an extraction failure. The 27 schedule records remain inactive. Raw archive tables/binding and Actions flags are absent, consistent with deferred activation. Older failed collection jobs are retained repair history, not recent failures. One delivery is recorded sent; this does not prove a successful vision extraction.
+
+Found and locally fixed token recovery overwriting all terminal interaction jobs with `needs_review` / `interaction expired`. Recovery now preserves terminal outcomes/errors while purging secrets, and only expires unfinished interactions. Existing mislabeled history is not guessed or rewritten. TypeScript and **156 tests** passed; deployment remains a separate gate. The initial read-only D1 request returned transient code7403; subsequent authenticated list/queries succeeded without login or configuration changes.

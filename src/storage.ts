@@ -18,7 +18,9 @@ export async function recover(env:Env) {
  await env.DB.batch([
  env.DB.prepare("UPDATE deliveries SET state='uncertain',error='send interrupted; manual reconciliation required',updated_at=? WHERE state='sending' AND updated_at<?").bind(nowIso(),new Date(Date.now()-15*60_000).toISOString()),
  env.DB.prepare("UPDATE jobs SET state=CASE WHEN kind IN ('deliver','interaction','meal-extract') THEN 'needs_review' WHEN attempts>=3 THEN 'failed' ELSE 'retry' END,error='lease expired',lease_until=NULL WHERE state='running' AND lease_until<?").bind(nowIso()),
- env.DB.prepare("UPDATE jobs SET payload='{}',state='needs_review',error='interaction expired' WHERE kind='interaction' AND (state IN ('done','failed','needs_review') OR created_at<?)").bind(new Date(Date.now()-15*60_000).toISOString())]);
+ env.DB.prepare("UPDATE jobs SET payload='{}',state='needs_review',error='interaction expired',lease_until=NULL WHERE kind='interaction' AND state IN ('pending','retry','running') AND created_at<?").bind(new Date(Date.now()-15*60_000).toISOString()),
+ // Token cleanup must preserve terminal outcomes, including successful commands.
+ env.DB.prepare("UPDATE jobs SET payload='{}' WHERE kind='interaction' AND state IN ('done','failed','needs_review') AND payload<>'{}'")]);
 }
 export function freshNotices(existing:Set<string>,rows:Notice[],initialized:boolean) {return initialized?rows.filter(n=>!existing.has(n.id)):[];}
 export async function saveNotices(env:Env,source:string,rows:Notice[],at:string) {

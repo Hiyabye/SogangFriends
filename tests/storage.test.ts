@@ -85,6 +85,28 @@ describe('D1-style storage with actual SQLite',()=>{
   ])).rejects.toThrow();
   expect(counts('guilds')).toBe(0);
  });
+ it('clears terminal interaction secrets without rewriting outcomes or failure reasons',async()=>{
+  vi.useFakeTimers();vi.setSystemTime(new Date('2026-10-10T10:00:00Z'));
+  for(const state of ['done','failed','needs_review'])for(const age of ['old','recent']){
+   const id=`${state}:${age}`;await enqueue(db.env,id,'interaction',{token:'fixture-secret'});
+   db.sqlite.prepare('UPDATE jobs SET state=?,error=?,created_at=? WHERE id=?').run(state,state==='done'?null:'original failure',age==='old'?'2026-10-10T09:00:00Z':'2026-10-10T09:59:00Z',id);
+  }
+  await recover(db.env);await recover(db.env);
+  for(const state of ['done','failed','needs_review'])for(const age of ['old','recent'])expect(row('jobs',`${state}:${age}`)).toMatchObject({state,payload:'{}',error:state==='done'?null:'original failure'});
+ });
+ it('expires only unfinished interactions while preserving live retry tokens',async()=>{
+  vi.useFakeTimers();vi.setSystemTime(new Date('2026-10-10T10:00:00Z'));
+  for(const state of ['pending','retry','running'])for(const age of ['old','recent']){
+   const id=`${state}:${age}`;await enqueue(db.env,id,'interaction',{token:'fixture-secret'});
+   db.sqlite.prepare('UPDATE jobs SET state=?,created_at=?,lease_until=? WHERE id=?').run(state,age==='old'?'2026-10-10T09:44:00Z':'2026-10-10T09:59:00Z','2026-10-10T10:20:00Z',id);
+  }
+  await recover(db.env);
+  for(const state of ['pending','retry','running']){
+   expect(row('jobs',`${state}:old`)).toMatchObject({state:'needs_review',payload:'{}',error:'interaction expired',lease_until:null});
+   expect(row('jobs',`${state}:recent`)).toMatchObject({state,error:null,lease_until:'2026-10-10T10:20:00Z'});
+   expect(String(row('jobs',`${state}:recent`)!.payload)).toContain('fixture-secret');
+  }
+ });
  it('recovers interrupted POSTs as uncertain rather than replaying',async()=>{
   await deliveryIntent(db.env,'interrupted','111','1001','hello');
   db.sqlite.prepare("UPDATE deliveries SET state='sending',updated_at='2026-01-01T00:00:00Z' WHERE id=?").run('interrupted');
