@@ -84,7 +84,7 @@ function freeModelPrices(metadata:Record<string,unknown>) {
  for(const key of Object.keys(pricing))if(price(key)!==0)throw new Error('Only zero-price free models are permitted');
  return {prompt:0,completion:0,image:0,request:0};
 }
-export async function extractMeal(env:Env,image:{bytes:Uint8Array;mime:string},expected:Expected):Promise<{week:MealWeek;actualCost:number|null;model:string}> {
+export async function extractMeal(env:Env,image:{bytes:Uint8Array;mime:string},expected:Expected,options:{allowPromptOnlyJson?:boolean}={}):Promise<{week:MealWeek;actualCost:number|null;model:string}> {
  if(!env.OPENROUTER_API_KEY||env.LLM_ENABLED!=='true')throw new MealExtractionError('Meal extraction disabled or key missing');
  if(image.bytes.length===0||image.bytes.length>5*1024*1024||!['image/jpeg','image/png'].includes(image.mime))throw new MealExtractionError('Invalid model image');
  const model=env.MEAL_MODEL??MEAL_PRIMARY_MODEL;
@@ -95,18 +95,23 @@ export async function extractMeal(env:Env,image:{bytes:Uint8Array;mime:string},e
   const catalog=object(await apiJson('https://openrouter.ai/api/v1/models',{},20_000,4*1024*1024));
   const entry=Array.isArray(catalog.data)?catalog.data.find((r:unknown)=>object(r).id===model):undefined;
   if(!entry)throw new Error('Configured model not listed');const metadata=object(entry);const arch=object(metadata.architecture);const parameters=metadata.supported_parameters;
-  if(!Array.isArray(arch.input_modalities)||!arch.input_modalities.includes('image')||!Array.isArray(parameters)||!parameters.includes('response_format'))throw new Error('Configured model lacks required vision or JSON output support');
-  responseFormat=parameters.includes('structured_outputs')?{type:'json_schema',json_schema:{name:'bellarmine_week',strict:true,schema:MEAL_SCHEMA}}:{type:'json_object'};
+  if(!Array.isArray(arch.input_modalities)||!arch.input_modalities.includes('image')||!Array.isArray(parameters)||(!parameters.includes('response_format')&&options.allowPromptOnlyJson!==true))throw new Error('Configured model lacks required vision or JSON output support');
+  // The operator may authorize prompt-only JSON for one selected model; no validation is relaxed.
+  responseFormat=parameters.includes('response_format')?(parameters.includes('structured_outputs')?{type:'json_schema',json_schema:{name:'bellarmine_week',strict:true,schema:MEAL_SCHEMA}}:{type:'json_object'}):undefined;
   maxPrice=freeModelPrices(metadata);
  }catch(error){throw new MealExtractionError(error instanceof MealExtractionError?error.message:error instanceof Error?error.message:'Model metadata failed',null,true,error instanceof MealExtractionError?error.retryAfter:undefined);}
  let actualCost:number|null=null;
+ let responseSummary='';
  try {
   const result=object(await apiJson('https://openrouter.ai/api/v1/chat/completions',{method:'POST',headers:{Authorization:`Bearer ${env.OPENROUTER_API_KEY}`,'Content-Type':'application/json'},body:JSON.stringify({model,provider:{require_parameters:true,max_price:maxPrice},temperature:0,max_tokens:6000,response_format:responseFormat,messages:[{role:'user',content:[{type:'text',text:`${PROMPT}\nRequired JSON schema (also applies in JSON mode): ${JSON.stringify(MEAL_SCHEMA)}`},{type:'image_url',image_url:{url:`data:${image.mime};base64,${base64(image.bytes)}`}}]}]})},120_000,512*1024));
   const usage=result.usage&&typeof result.usage==='object'&&!Array.isArray(result.usage)?result.usage as Record<string,unknown>:{};
   actualCost=typeof usage.cost==='number'&&Number.isFinite(usage.cost)&&usage.cost>=0?usage.cost:null;
   if(!Array.isArray(result.choices)||result.choices.length!==1)throw new Error('Invalid model choices');const choice=object(result.choices[0]);const answer=object(choice.message);
+  const finish=['stop','length','tool_calls','function_call','content_filter','error'].includes(String(choice.finish_reason))?String(choice.finish_reason):'other';
+  responseSummary=`; finish=${finish}, content_chars=${typeof answer.content==='string'?answer.content.length:0}`;
   if(choice.finish_reason!=='stop'||typeof answer.content!=='string'||answer.refusal)throw new Error('Incomplete model extraction');
-  return {week:validateMeal(JSON.parse(answer.content),expected),actualCost,model:typeof result.model==='string'?result.model:model};
+  let content:unknown;try{content=JSON.parse(answer.content);}catch{throw new Error('Invalid answer JSON');}
+  return {week:validateMeal(content,expected),actualCost,model:typeof result.model==='string'?result.model:model};
  }catch(error){
   if(error instanceof MealExtractionError){
    if(error.safeRetry&&error.message.startsWith('Model service HTTP 429')){
@@ -121,7 +126,9 @@ export async function extractMeal(env:Env,image:{bytes:Uint8Array;mime:string},e
    throw error;
   }
   // apiJson completed before these JSON/schema/date errors: another response may be valid.
-  throw new MealExtractionError('Meal output rejected after complete response',actualCost,true);
+  const reasons=['Invalid meal object','Unexpected meal fields','Invalid meal offering','Available meal lacks evidence','Unavailable meal has menu','Closure lacks explicit evidence','Cup rice time lacks evidence','Invalid source meal period','Uncertain or conflicting meal period','Invalid observed date or weekday','Invalid model choices','Incomplete model extraction','Invalid answer JSON'];
+  const reason=error instanceof Error&&reasons.includes(error.message)?error.message:'Invalid meal response';
+  throw new MealExtractionError(`Meal output rejected after complete response: ${reason}${responseSummary}`,actualCost,true);
  }
 }
 function clip(text:string,limit:number):string {

@@ -44,6 +44,49 @@ describe('strict observed meal validation',()=>{
   vi.stubGlobal('fetch',vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({data:[free]}))).mockResolvedValueOnce(response(JSON.stringify({...sample(),certain:false}))));
   await expect(extractMeal({...env,MEAL_MODEL:undefined},image,expected)).rejects.toThrow('output rejected');
  });
+ it('requires an explicit prompt-only exception for NVIDIA without response_format',async()=>{
+  const nvidia={...metadata(),id:'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',supported_parameters:['max_tokens','reasoning','temperature']};
+  const fetcher=vi.fn().mockResolvedValueOnce(Response.json({data:[nvidia]}));vi.stubGlobal('fetch',fetcher);
+  await expect(extractMeal({...env,MEAL_MODEL:nvidia.id},image,expected)).rejects.toThrow('lacks required');expect(fetcher).toHaveBeenCalledTimes(1);
+ });
+ it('omits NVIDIA response_format only with approval while retaining zero routing, schema prompt and semantic validation',async()=>{
+  const nvidia={...metadata(),id:'nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',supported_parameters:['max_tokens','reasoning','temperature']};
+  const fetcher=vi.fn().mockResolvedValueOnce(Response.json({data:[nvidia]})).mockResolvedValueOnce(Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify(sample())}}],usage:{cost:0}}));vi.stubGlobal('fetch',fetcher);
+  expect((await extractMeal({...env,MEAL_MODEL:nvidia.id},image,expected,{allowPromptOnlyJson:true})).week.days).toHaveLength(7);
+  const body=JSON.parse(fetcher.mock.calls[1][1].body);
+  expect(body).not.toHaveProperty('response_format');expect(body.provider).toEqual({require_parameters:true,max_price:{prompt:0,completion:0,image:0,request:0}});
+  expect(body.messages[0].content[0].text).toContain('Required JSON schema');expect(body.messages[0].content[0].text).toContain('breakfastKorean');
+  vi.stubGlobal('fetch',vi.fn().mockResolvedValueOnce(Response.json({data:[nvidia]})).mockResolvedValueOnce(Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify({...sample(),certain:false})}}],usage:{cost:0}})));
+  const error=await extractMeal({...env,MEAL_MODEL:nvidia.id},image,expected,{allowPromptOnlyJson:true}).catch(e=>e);
+  expect(error).toMatchObject({actualCost:0,safeRetry:true});expect(error.message).toContain('Uncertain or conflicting meal period');
+ });
+ it('keeps Dots strict schema even when prompt-only permission is passed',async()=>{
+  const dots={...metadata(),id:'dots-studio/dots-3-note-preview:free'};
+  const fetcher=vi.fn().mockResolvedValueOnce(Response.json({data:[dots]})).mockResolvedValueOnce(Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify(sample())}}]}));vi.stubGlobal('fetch',fetcher);
+  await extractMeal({...env,MEAL_MODEL:dots.id},image,expected,{allowPromptOnlyJson:true});
+  expect(JSON.parse(fetcher.mock.calls[1][1].body).response_format).toMatchObject({type:'json_schema',json_schema:{strict:true}});
+ });
+ it('never lets prompt-only permission bypass free pricing, image input or parameter metadata',async()=>{
+  for(const model of [{...metadata(),architecture:{input_modalities:['text']}},{...metadata(),supported_parameters:undefined},{...metadata(),pricing:{prompt:'0',completion:'0.01'}}]){
+   const fetcher=vi.fn().mockResolvedValueOnce(Response.json({data:[model]}));vi.stubGlobal('fetch',fetcher);
+   await expect(extractMeal(env,image,expected,{allowPromptOnlyJson:true})).rejects.toBeInstanceOf(MealExtractionError);expect(fetcher).toHaveBeenCalledTimes(1);
+  }
+  const fetcher=vi.fn();vi.stubGlobal('fetch',fetcher);
+  await expect(extractMeal({...env,MEAL_MODEL:'paid/model'},image,expected,{allowPromptOnlyJson:true})).rejects.toThrow('Only :free');expect(fetcher).not.toHaveBeenCalled();
+ });
+ it('reports fixed completion diagnostics without exposing answer, refusal or unknown finish text',async()=>{
+  for(const [finish,content,refusal,reason] of [
+   ['length','sensitive-model-content','sensitive-refusal','Incomplete model extraction'],
+   ['sensitive-finish','sensitive-model-content',undefined,'Incomplete model extraction'],
+   ['stop','sensitive-invalid-json',undefined,'Invalid answer JSON'],
+   ['stop',JSON.stringify({...sample(),certain:false,secret:'sensitive-extra-field'}),undefined,'Unexpected meal fields']
+  ]){
+   const fetcher=vi.fn().mockResolvedValueOnce(Response.json({data:[metadata()]})).mockResolvedValueOnce(Response.json({choices:[{finish_reason:finish,message:{content,refusal}}],usage:{cost:.012}}));vi.stubGlobal('fetch',fetcher);
+   const error=await extractMeal(env,image,expected).catch(e=>e);
+   expect(error).toMatchObject({actualCost:.012,safeRetry:true});expect(error.message).toContain(reason);expect(error.message).not.toContain('sensitive');
+   expect(error.message).toContain(`finish=${finish==='sensitive-finish'?'other':finish}, content_chars=${String(content).length}`);
+  }
+ });
  it('caps maximum valid menus while preserving the complete original link and labels',()=>{
   const x=sample() as any;
   for(const key of ['breakfastKorean','breakfastWestern','dinner','cupRice']) x.days[0][key]={status:'available',items:Array(20).fill('메뉴😀'.repeat(25)),time:key==='cupRice'?'11:40':null,evidence:'10/12 메뉴 11:40'};

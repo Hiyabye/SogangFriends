@@ -23,6 +23,46 @@ beforeEach(async()=>{
 afterEach(()=>{db.close();vi.useRealTimers();vi.restoreAllMocks();});
 
 describe('durable five-plus-five meal policy',()=>{
+ it('retries image preflight failure without inference or a reservation, redacting source errors',async()=>{
+  vi.spyOn(await import('../src/sources'),'fetchImage').mockRejectedValueOnce(new Error('private-upstream-body'));
+  await run();expect(row().state).toBe('retry');expect(row().error).toContain('Meal image preflight failed');expect(row().error).not.toContain('private-upstream-body');
+  expect(extractMeal).not.toHaveBeenCalled();expect(db.sqlite.prepare('SELECT COUNT(*) n FROM llm_usage').get()!.n).toBe(0);
+ });
+ it('does not retry an image identity change or consume an LLM reservation',async()=>{
+  vi.spyOn(await import('../src/sources'),'fetchImage').mockResolvedValueOnce({bytes:new Uint8Array([1]),mime:'image/png',hash:'changed'});
+  await run();expect(row()).toMatchObject({state:'needs_review',error:'Meal image changed; rediscovery required'});
+  expect(extractMeal).not.toHaveBeenCalled();expect(db.env.JOBS.send).not.toHaveBeenCalled();
+ });
+ it('retries a reservation preflight exception before inference, without exposing the database error',async()=>{
+  const prepare=db.env.DB.prepare.bind(db.env.DB);
+  vi.spyOn(db.env.DB,'prepare').mockImplementation(sql=>sql.startsWith('SELECT state,reserved_usd,day FROM llm_usage')?{bind:()=>({first:async()=>{throw new Error('private-db-details');}})} as any:prepare(sql));
+  await run();expect(row().state).toBe('retry');expect(row().error).toContain('Meal reservation preflight failed');expect(row().error).not.toContain('private-db-details');expect(extractMeal).not.toHaveBeenCalled();
+ });
+ it('retains a safe fixed transport diagnostic and an uncertain reservation without replay',async()=>{
+  vi.mocked(extractMeal).mockRejectedValue(new MealExtractionError('Model service transport failed'));
+  await run();expect(row()).toMatchObject({state:'needs_review',error:'Model service transport failed'});expect(usage().state).toBe('reserved');expect(db.env.JOBS.send).not.toHaveBeenCalled();
+ });
+ it('scopes prompt-only JSON to the snapshotted NVIDIA fallback',async()=>{
+  const models=['dots-studio/dots-3-note-preview:free','nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free'];
+  db.sqlite.prepare("UPDATE jobs SET payload=? WHERE id='meal'").run(JSON.stringify({...payload,models,promptOnlyJsonModel:models[1]}));
+  vi.mocked(extractMeal).mockRejectedValue(new MealExtractionError('Rejected',null,true));
+  for(const delay of [60,120,240,480,60]){await run();expect(vi.mocked(extractMeal).mock.lastCall![3]).toEqual({allowPromptOnlyJson:false});vi.advanceTimersByTime(delay*1000);}
+  await run();expect(vi.mocked(extractMeal).mock.lastCall![0].MEAL_MODEL).toBe(models[1]);expect(vi.mocked(extractMeal).mock.lastCall![3]).toEqual({allowPromptOnlyJson:true});
+ });
+ it('allows only a third operator run without changing ordinary caps or clearing previous reservations',async()=>{
+  db.sqlite.exec("INSERT INTO llm_usage(id,day,reserved_usd,state,created_at) VALUES('old-1','2026-10-10',0.25,'safe_retry','now'),('old-2','2026-10-10',0.25,'safe_retry','now')");
+  db.sqlite.prepare("UPDATE jobs SET payload=? WHERE id='meal'").run(JSON.stringify({...payload,operatorExtraRun:true}));
+  vi.mocked(extractMeal).mockResolvedValue({week,actualCost:0,model:MEAL_PRIMARY_MODEL});
+  await run();expect(row().state).toBe('done');expect(extractMeal).toHaveBeenCalledTimes(1);
+  expect(db.env.LLM_DAILY_CALLS).toBe('2');expect(db.env.LLM_DAILY_BUDGET_USD).toBe('0.50');
+  expect(db.sqlite.prepare("SELECT COUNT(*) n FROM llm_usage WHERE state='safe_retry' AND reserved_usd=0.25 AND actual_usd IS NULL").get()!.n).toBe(2);
+  for(const operatorExtraRun of [false,true]){
+   const id='extra-'+operatorExtraRun;await enqueue(db.env,id,'meal-extract',{...payload,operatorExtraRun});
+   await consume(db.env,{messages:[{body:{id},ack:vi.fn()}],queue:'fixture'} as never);
+   expect(db.sqlite.prepare('SELECT state FROM jobs WHERE id=?').get(id)!.state).toBe('needs_review');
+  }
+  expect(extractMeal).toHaveBeenCalledTimes(1);expect(db.sqlite.prepare('SELECT COUNT(*) n FROM llm_usage').get()!.n).toBe(3);
+ });
  it('stops an operator one-off verification after its first confirmed rejection',async()=>{
   db.sqlite.prepare("UPDATE jobs SET payload=? WHERE id='meal'").run(JSON.stringify({...payload,models:['dots-studio/dots-3-note-preview:free'],verificationOnly:true}));
   vi.mocked(extractMeal).mockRejectedValue(new MealExtractionError('Model service HTTP 429',null,true));

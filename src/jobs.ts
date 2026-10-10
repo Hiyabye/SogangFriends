@@ -72,16 +72,21 @@ export async function executeJob(env:Env,job:Job) {
  break;
  }
  case 'meal-extract': {
- const image=await fetchImage(payload.imageUrl);
- if(image.hash!==payload.hash) throw new Error('image changed; rediscovery required');
- if(!await reserveLlm(env,job.id,todayKst())) {
+ let image:Awaited<ReturnType<typeof fetchImage>>;
+ try{image=await fetchImage(payload.imageUrl);}catch{throw new MealExtractionError('Meal image preflight failed',null,true);}
+ if(image.hash!==payload.hash) throw new MealExtractionError('Meal image changed; rediscovery required');
+ // Only an explicitly operator-created verification job gets this extra-run allowance.
+ const reservationEnv=payload.operatorExtraRun===true?{...env,LLM_DAILY_CALLS:'3',LLM_DAILY_BUDGET_USD:'0.75'}:env;
+ let reserved:boolean;
+ try{reserved=await reserveLlm(reservationEnv,job.id,todayKst());}catch{throw new MealExtractionError('Meal reservation preflight failed',null,true);}
+ if(!reserved) {
  await env.DB.prepare("INSERT INTO health(id,last_attempt,error) VALUES('meal',?,'LLM disabled or budget blocked') ON CONFLICT(id) DO UPDATE SET last_attempt=excluded.last_attempt,error=excluded.error").bind(nowIso()).run();
  // A blocked job can be explicitly retried by operator, not on every queue redelivery.
- throw new Error('LLM blocked');
+ throw new MealExtractionError('LLM disabled or budget blocked');
  }
  const models=payload.models??[env.MEAL_MODEL??MEAL_PRIMARY_MODEL,env.MEAL_FALLBACK_MODEL??MEAL_FALLBACK_MODEL];
  const model=models[job.attempts<=MEAL_ATTEMPTS_PER_MODEL?0:1];
- const result=await extractMeal({...env,MEAL_MODEL:model},image,{start:payload.start,end:payload.end,published:payload.published});
+ const result=await extractMeal({...env,MEAL_MODEL:model},image,{start:payload.start,end:payload.end,published:payload.published},{allowPromptOnlyJson:payload.promptOnlyJsonModel===model});
  const at=nowIso();
  await env.DB.batch([
  env.DB.prepare('INSERT OR IGNORE INTO meals(cache_key,source_url,image_hash,version,start_date,end_date,data,extracted_at,verified_at,model) VALUES(?,?,?,?,?,?,?,?,?,?)').bind(payload.key,payload.url,image.hash,payload.version,payload.start,payload.end,JSON.stringify(result.week),at,at,result.model),
@@ -158,8 +163,9 @@ export async function consume(env:Env,batch:MessageBatch<{id:string}>) {
  } else if(job.kind==='interaction') {
  await retryJob(env,job,'interaction completion failed',5);
  } else if(job.kind==='meal-extract') {
- await env.DB.prepare("UPDATE jobs SET state='needs_review',lease_until=NULL,error=? WHERE id=?").bind(job.kind==='meal-extract'?'meal extraction blocked/failed; inspect source and budget':'interaction failed',job.id).run();
- if(job.kind==='meal-extract') await env.DB.prepare("INSERT INTO health(id,last_attempt,error) VALUES('meal',?,'extraction blocked/failed') ON CONFLICT(id) DO UPDATE SET last_attempt=excluded.last_attempt,error=excluded.error").bind(nowIso()).run();
+ const reason=error instanceof MealExtractionError?error.message:'meal extraction blocked/failed; inspect source and budget';
+ await env.DB.prepare("UPDATE jobs SET state='needs_review',lease_until=NULL,error=? WHERE id=?").bind(reason,job.id).run();
+ await env.DB.prepare("INSERT INTO health(id,last_attempt,error) VALUES('meal',?,?) ON CONFLICT(id) DO UPDATE SET last_attempt=excluded.last_attempt,error=excluded.error").bind(nowIso(),reason).run();
  } else if(job.kind==='notice-snapshot'&&Date.now()-Date.parse(job.created_at)>30*60_000) {
  await env.DB.prepare("UPDATE jobs SET state='failed',lease_until=NULL,error='Notice snapshot expired' WHERE id=?").bind(job.id).run();
  } else {
