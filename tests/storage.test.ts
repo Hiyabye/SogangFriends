@@ -119,6 +119,27 @@ describe('D1-style storage with actual SQLite',()=>{
  });
 });
 
+describe('schedule delivery planning without LLM',()=>{
+ it('separates start and deadline keys, preserves old deadline keys, and deduplicates repeat runs',async()=>{
+  vi.useFakeTimers();vi.setSystemTime(new Date('2026-10-13T00:00:00Z'));
+  db.sqlite.prepare('INSERT INTO guilds(id,schedule_channel,updated_at) VALUES(?,?,?)').run('111','1001','now');
+  const item={id:'application',title:'신청',startDate:'2026-10-20',endDate:'2026-10-27',deadlineDate:'2026-10-27',type:'period',sourceUrl:'https://www.sogang.ac.kr/ko/academic-support/calendar',lastReviewed:'2026-10-10',note:'',active:true};
+  db.sqlite.prepare('INSERT INTO schedules(id,data,active) VALUES(?,?,1)').run(item.id,JSON.stringify(item));
+  const daily=(date:string):Job=>({id:`schedule-daily:${date}`,kind:'schedule-daily',payload:JSON.stringify({date}),state:'running',attempts:1,created_at:new Date().toISOString(),lease_until:null});
+  const fetch=vi.fn();vi.stubGlobal('fetch',fetch);
+  await executeJob(db.env,daily('2026-10-13'));await executeJob(db.env,daily('2026-10-13'));
+  expect(counts('deliveries')).toBe(1);
+  expect(row('deliveries','schedule:111:application:start:7')!.content).toContain('[학사 일정 시작 D-7]');
+  expect(row('deliveries','schedule:111:application:start:7')!.content).not.toContain('마감 시각');
+  vi.setSystemTime(new Date('2026-10-20T00:00:00Z'));
+  await executeJob(db.env,daily('2026-10-20'));await executeJob(db.env,daily('2026-10-20'));
+  expect(counts('deliveries')).toBe(3);
+  expect(row('deliveries','schedule:111:application:7')!.content).toContain('[학사 일정 마감 D-7]');
+  expect(row('deliveries','schedule:111:application:start:0')).toBeTruthy();
+  expect(counts('llm_usage')).toBe(0);expect(fetch).not.toHaveBeenCalled();
+ });
+});
+
 describe('delivery consumer integration',()=>{
  it('claims the same Queue message once across overlapping consumers',async()=>{
   db.env.DISCORD_TOKEN='fixture-only';await deliveryIntent(db.env,'concurrent','111','1001','hello');

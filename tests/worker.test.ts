@@ -131,5 +131,6 @@ describe('interaction and durable integration',()=>{
  await consume(db.env,{messages:[{body:{id:'rate-job'},ack:vi.fn()}],queue:'test'} as any);
  expect(db.sqlite.prepare('SELECT state FROM jobs').get()!.state).toBe('retry');
  expect(db.sqlite.prepare('SELECT state FROM llm_usage').get()!.state).toBe('safe_retry');
+ expect(db.sqlite.prepare("SELECT error FROM health WHERE id='meal'").get()!.error).toBe('OpenRouter confirmed rejection/preflight failure: 429');
  }finally{db.close();}});
 });

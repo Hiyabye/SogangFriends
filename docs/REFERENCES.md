@@ -19,7 +19,7 @@ Official APIs/documentation:
 - https://openrouter.ai/docs/guides/routing/provider-selection#max-price
 - https://openrouter.ai/api/v1/models
 
-Public model metadata checked, not OCR quality. Free-only policy: default google/gemma-4-31b-it:free currently advertises image input + response_format, but not structured_outputs. Use JSON mode with schema in prompt and unchanged runtime semantic validation; strict schema remains preferred for supporting free models. Every configured ID must end in :free and all published prices must be zero; provider max_price is also zero. Metadata is rechecked before each extraction; changes fail closed. No paid fallback.
+Public model metadata checked, not OCR quality. Free-only policy: default google/gemma-4-26b-a4b-it:free (user-approved replacement after repeated 31B inference 429s on 2026-10-10) currently advertises image input + response_format, but not structured_outputs. Use JSON mode with schema in prompt and unchanged runtime semantic validation; strict schema remains preferred for supporting free models. Every configured ID must end in :free and all published prices must be zero; provider max_price is also zero. Metadata is rechecked before each extraction; changes fail closed. No paid fallback.
 
 Free quota reference: https://openrouter.ai/docs/api/reference/limits — verify account limits; 1000/day is conditional, not universal. Current public guidance reports 50/day by default and 1000/day after at least $10 of credit purchase, with 20/minute for free models.
 

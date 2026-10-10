@@ -63,7 +63,7 @@ export async function executeJob(env:Env,job:Job) {
  const info=await discoverMeal();
  await env.DB.prepare("INSERT INTO health(id,last_attempt,last_success,source_url,error) VALUES('meal-discovery',?,?,?,NULL) ON CONFLICT(id) DO UPDATE SET last_attempt=excluded.last_attempt,last_success=excluded.last_success,source_url=excluded.source_url,error=NULL").bind(nowIso(),nowIso(),info.url).run();
  const image=await fetchImage(info.imageUrl);
- const version=env.PROCESSING_VERSION??'meal-v2-free';
+ const version=env.PROCESSING_VERSION??'meal-v3-gemma26-free';
  const key=`${image.hash}:${version}:${info.start}:${info.end}:${info.url}`;
  const cached=await env.DB.prepare('SELECT cache_key FROM meals WHERE cache_key=?').bind(key).first();
  if(cached) await env.DB.prepare('UPDATE meals SET verified_at=? WHERE cache_key=?').bind(nowIso(),key).run();
@@ -94,10 +94,15 @@ export async function executeJob(env:Env,job:Job) {
  }
  case 'schedule-daily': {
  if(payload.date!==todayKst()) break;
- for(const {item,offset} of dueReminders(await getSchedules(env),payload.date)) {
+ for(const {item,offset,kind,date} of dueReminders(await getSchedules(env),payload.date)) {
  const label=offset===0?'당일':`D-${offset}`;
- const text=`[학사 일정 ${label}] ${item.title}\n${item.deadlineAt??item.deadlineDate} ${item.deadlineAt?'':'(날짜만 공지됨; 마감 시각 확인 필요)'}\n${item.sourceUrl}`;
- for(const g of await recipients(env,'schedule_channel')) await deliveryIntent(env,`schedule:${g.id}:${item.id}:${offset}`,g.id,g.channel,text,new Date(`${payload.date}T15:00:00Z`).toISOString());
+ const phase=kind==='start'?'시작':item.type!=='deadline'&&item.startDate===date?'시작·마감':'마감';
+ const when=kind==='deadline'?(item.deadlineAt??date):item.endDate?`${date} ~ ${item.endDate}`:date;
+ const caution=kind==='deadline'?(item.deadlineAt?'':' (날짜만 공지됨; 마감 시각 확인 필요)'):' (날짜 기준; 세부 운영 시각은 원문 확인)';
+ const text=`[학사 일정 ${phase} ${label}] ${item.title}\n${when}${caution}${item.note?`\n${item.note}`:''}\n${item.sourceUrl}`;
+ // Preserve existing deadline keys; start reminders have a separate identity.
+ const suffix=kind==='deadline'?String(offset):`start:${offset}`;
+ for(const g of await recipients(env,'schedule_channel')) await deliveryIntent(env,`schedule:${g.id}:${item.id}:${suffix}`,g.id,g.channel,text,new Date(`${payload.date}T15:00:00Z`).toISOString());
  }
  break;
  }
@@ -133,7 +138,9 @@ export async function consume(env:Env,batch:MessageBatch<{id:string}>) {
  if(job.kind==='meal-extract' && error instanceof MealExtractionError && error.actualCost!==null) await env.DB.prepare("UPDATE llm_usage SET actual_usd=?,state='rejected' WHERE id=?").bind(error.actualCost,job.id).run();
  if(job.kind==='meal-extract' && error instanceof MealExtractionError && error.safeRetry) {
  await env.DB.prepare("UPDATE llm_usage SET state='safe_retry' WHERE id=? AND actual_usd IS NULL").bind(job.id).run();
- await retryJob(env,job,'OpenRouter confirmed rejection/preflight failure',error.retryAfter??60);
+ const reason=`OpenRouter confirmed rejection/preflight failure: ${error.message}`;
+ await retryJob(env,job,reason,error.retryAfter??60);
+ await env.DB.prepare("INSERT INTO health(id,last_attempt,error) VALUES('meal',?,?) ON CONFLICT(id) DO UPDATE SET last_attempt=excluded.last_attempt,error=excluded.error").bind(nowIso(),reason).run();
  } else if(job.kind==='interaction') {
  await retryJob(env,job,'interaction completion failed',5);
  } else if(job.kind==='meal-extract') {

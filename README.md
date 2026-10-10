@@ -49,7 +49,7 @@ npx wrangler d1 execute sogang-friends --local --file=data/schedule.sql
 npm run dev -- --test-scheduled
 ```
 
-`wrangler.toml`은 새 리소스용 placeholder 설정입니다. `.env.example`을 참고해 필요시 `.dev.vars`에 로컬 secrets를 작성합니다. 기본 `LLM_ENABLED=false`. Discord는 `/interactions`, 외부 공지 수집기는 HMAC 인증이 필요한 `/internal/notices`를 사용합니다. 외부 수집 모드는 `NOTICE_COLLECTION_MODE=external`; 전용 `NOTICE_INGEST_SECRET` 설정 전 접수는 503입니다. 활성 endpoint에 서명 없는 POST는 401이 정상입니다. 로컬 Cron 테스트 `/__scheduled`는 dev 전용이며 **실제 원본 수집을 수행할 수 있으므로** fixture 테스트와 구분하세요. 기본 `npm test`는 외부 요청을 하지 않습니다.
+`wrangler.toml`은 새 리소스용 placeholder 설정입니다. `.env.example`을 참고해 필요시 `.dev.vars`에 로컬 secrets를 작성합니다. 현재 `LLM_ENABLED=true`입니다. 새 환경에서 모델 호출을 원하지 않으면 배포 전에 false로 변경하세요. Discord는 `/interactions`, 외부 공지 수집기는 HMAC 인증이 필요한 `/internal/notices`를 사용합니다. 외부 수집 모드는 `NOTICE_COLLECTION_MODE=external`; 전용 `NOTICE_INGEST_SECRET` 설정 전 접수는 503입니다. 활성 endpoint에 서명 없는 POST는 401이 정상입니다. 로컬 Cron 테스트 `/__scheduled`는 dev 전용이며 **실제 원본 수집을 수행할 수 있으므로** fixture 테스트와 구분하세요. 기본 `npm test`는 외부 요청을 하지 않습니다.
 
 ## 2. 사용자가 준비할 Discord 설정
 
@@ -110,9 +110,10 @@ Cron은 15분마다 실행. `/status`의 `식단·Cron`에서 `id=cron`의 `last
 
 무료 요청 한도는 모든 계정에 무조건 1000회/일이 아닙니다. 현재 공식 안내는 기본 50회/일, $10 이상 credit 구매 시 1000회/일, 20회/분입니다. 사용자는 $10 이상 credit 구매를 확인했으므로 현재 계정 한도는 **1000회/일·20회/분**입니다(`AGENTS.md`에도 기록). 식단과 이후 공지 가공 등 용도 간 공유 한도이며 기능마다 따로 1000회를 부여하지 않습니다. 현재 식단 하루2회 제한은 별도 설정으로 유지합니다. 봇은 credit 잔액이 있더라도 유료 모델을 사용하지 않습니다. [공식 안내](https://openrouter.ai/docs/api/reference/limits)
 
-- `MEAL_MODEL`: 기본 `google/gemma-4-31b-it:free`. 현재 public metadata상 image + response_format 지원, structured_outputs 미지원이므로 JSON mode 사용. schema는 prompt에 명시하고 코드 의미 검증은 동일하게 유지합니다. 무료 모델이 structured_outputs를 지원하면 strict schema로 요청합니다. 실제 식단 OCR 성능은 아직 검증하지 않았습니다.
-- `LLM_ENABLED=true`로 켜기 전 이미지 결과를 검토하세요. false/키 누락은 공지·일정·저장 식단 조회를 막지 않습니다.
+- `MEAL_MODEL`: 기본 `google/gemma-4-26b-a4b-it:free` (`PROCESSING_VERSION=meal-v3-gemma26-free`). 2026-10-10 첫 활성화에서 31B 무료 모델이 반복 429를 반환하여 사용자가 26B 무료 모델로 변경을 승인했습니다. 두 모델 모두 public metadata상 image + response_format 지원, structured_outputs 미지원이므로 JSON mode 사용. schema는 prompt에 명시하고 코드 의미 검증은 동일하게 유지합니다. 무료 모델이 structured_outputs를 지원하면 strict schema로 요청합니다. 실제 식단 OCR 성능은 아직 검증하지 않았습니다.
+- `LLM_ENABLED=true`는 **식단 추출에만 적용**됩니다. 공지 LLM 처리나 학사 일정 추론을 활성화하지 않습니다. 최초 추출 결과는 실제 원본 이미지와 대조하세요. false/키 누락은 공지·일정·저장 식단 조회를 막지 않습니다.
 - `LLM_DAILY_CALLS=2`, `LLM_DAILY_BUDGET_USD=0.50`, `LLM_MAX_CALL_USD=0.25`.
+- 2026-10-10 운영 활성화: 설정은 켜졌지만 31B·26B 첫 추출 작업이 각각 3회 HTTP429로 거절되어 **저장된 식단은 아직 없습니다**. 운영 키의 일일 한도는 실제로 1000회이며 사용0회·잔여1000회였습니다. 일일 한도 소진은 아니지만 정확한 제한 원인은 미확인입니다. 두 실패 작업은 자동 재생성되지 않으므로 추후 명시적 재시도 승인이 필요합니다. 상세 기록은 [VERIFICATION.md](docs/VERIFICATION.md).
 - 마지막 값은 기존 D1 예산 회로의 **호출당 보수적 예약액**으로 유지하며 예상 청구액이 아닙니다. 무료 모델의 확인된 단가는 0입니다. 기본 자동 추출은 하루 2개 작업으로 충분하며 1000회 한도를 소진하려는 설정이 아닙니다. unknown/실패 사용량은 환급하지 않고, 응답에 비용이 있다면 메뉴가 거부돼도 기록합니다.
 - prompt/completion 가격은 필수 확인, image/request와 기타 공개 과금 항목도 모두 0이어야 합니다. `provider.max_price`도 0으로 요청합니다. 가격 또는 지원 metadata 변경은 fail-closed.
 - 다른 무료 모델로 설정할 수 있지만 이미지 입력과 JSON 출력은 필수입니다. `:free`가 아닌 모델·자동 모델 선택 router·유료 대체 경로는 사용하지 않습니다.
@@ -120,13 +121,13 @@ Cron은 15분마다 실행. `/status`의 `식단·Cron`에서 `id=cron`의 `last
 - exact image SHA256 + 처리 버전 + 공식 post URL + 기간이면 기존 결과 사용. `PROCESSING_VERSION`은 prompt/schema/검증 변경 시 올립니다.
 - 관측 날짜/요일 중복·누락·범위 충돌, 불확실 출력 거부. 공백은 미운영이 아니라 unknown. 컵밥은 해당 날짜 메뉴 근거가 있어야만 표시; 시간은 원문 근거일 때만 표시.
 - 모델에는 inline image·JSON schema·추출 지시만 제공하고 임의 URL/Discord 관리 도구를 주지 않습니다.
-- 최초 추출은 사용자 검토 후 활성화하세요. JSON mode/schema와 evidence는 정확성을 증명하지 않습니다.
+- 활성화 직후에는 일회성 발견 작업으로 추출·저장을 확인할 수 있습니다. 이 작업 자체는 Discord에 즉시 게시하지 않습니다. JSON mode/schema와 evidence는 정확성을 증명하지 않으며, 실제 원본 대조가 필요합니다.
 
 현재 수동 수정/승인 UI와 arbitrary menu override는 제공하지 않습니다. 이상한 정상 결과는 해당 D1 캐시를 비공개로 격리하고 원문을 확인해야 합니다. 검토 데이터 자동 적용은 다음 버전에서 post URL/hash/기간에 묶인 형식으로 추가합니다.
 
 ## 5. 학사 일정 검토·초기화
 
-`data/schedule.json`은 공식 본부 일정의 실제 데이터이며 예시가 아닙니다. 학교 자료를 확인한 날짜는 2026-10-09. 모두 `active:false`: **사용자의 사람 검토를 대신하지 않습니다.** 출처 비교와 불일치는 [docs/schedule-evidence.md](docs/schedule-evidence.md).
+`data/schedule.json`은 공식 본부 일정의 실제 데이터이며 예시가 아닙니다. 학교 자료를 확인한 날짜는 2026-10-09. 원본 seed는 모두 `active:false`: **사용자의 사람 검토를 대신하지 않습니다.** 운영 D1에서는 2026-10-10 사용자 승인으로 학생 대상 24개를 활성화했습니다. 일반 import는 비활성 SQL을 생성하므로 운영 일정을 유지하려면 명시적 승인 import를 사용하세요. 출처 비교와 불일치는 [docs/schedule-evidence.md](docs/schedule-evidence.md).
 
 ```sh
 # 사용자: 공식 자료, 신청 기간의 마감 의미, 변경 사항 확인 후
@@ -137,7 +138,9 @@ npx wrangler d1 execute sogang-friends --local --file=data/schedule.sql
 npx wrangler d1 execute sogang-friends --remote --file=data/schedule.sql
 ```
 
-ID는 날짜를 바꾸더라도 유지합니다. 신청 기간은 기간과 date-only 마감일을 같이 저장, 시험/학기 시작/휴일은 deadline 아님. 교직원 성적 제출 마감은 학생 알림에서 제외. D-7/D-1/당일만 알림, 안정 event ID + offset + guild로 중복 차단. 일정 변경 후 이미 발송한 같은 offset 알림은 자동 재발송하지 않습니다(정정 알림은 다음 버전). 삭제 대신 해당 ID를 명시적으로 비활성화하세요; importer는 누락 ID를 자동 삭제하지 않습니다. `--approve`는 파일 전체 학생 대상 항목을 승인하므로 전체를 검토하세요.
+일정 알림은 **LLM을 사용하지 않습니다.** 승인된 공식 날짜 데이터만으로 매일 `MEAL_TIME_KST`(현재 07:30 KST)에 알림을 계획합니다. 행사·시험·신청 기간의 **시작일**과 명시된 학생 관련 **마감일**에 각각 D-7/D-1/당일 알림을 보냅니다. 시작과 마감이 같은 날짜면 한 번만 보내며, 과거 알림은 소급 발송하지 않습니다.
+
+ID는 날짜를 바꾸더라도 유지합니다. 신청 기간은 기간과 date-only 마감일을 같이 저장, 시험/학기 시작/휴일은 deadline 아님. 기간 종료를 임의의 마감으로 만들지 않습니다. 교직원 성적 제출 일정은 학생 알림에서 제외. 안정 event ID + 시작/마감 구분 + offset + guild로 중복 차단하며 기존 마감 알림 키를 유지합니다. 일정 변경 후 이미 발송한 같은 offset 알림은 자동 재발송하지 않습니다(정정 알림은 다음 버전). 삭제 대신 해당 ID를 명시적으로 비활성화하세요; importer는 누락 ID를 자동 삭제하지 않습니다. `--approve`는 파일 전체 학생 대상 항목을 승인하므로 전체를 검토하세요.
 
 ## 6. 장애 확인과 재처리
 

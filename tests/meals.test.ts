@@ -36,7 +36,7 @@ describe('strict observed meal validation',()=>{
   await expect(extractMeal({...env,MEAL_MODEL:'custom/model'},image,expected)).rejects.toThrow('Only :free');expect(fetcher).not.toHaveBeenCalled();
  });
  it('uses Gemma default JSON mode with explicit schema prompt and unchanged semantic validation',async()=>{
-  const free={...metadata(),id:'google/gemma-4-31b-it:free',supported_parameters:['response_format']};
+  const free={...metadata(),id:'google/gemma-4-26b-a4b-it:free',supported_parameters:['response_format']};
   const response=(content:string)=>new Response(JSON.stringify({choices:[{finish_reason:'stop',message:{content}}],usage:{cost:0}}));
   const fetcher=vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({data:[free]}))).mockResolvedValueOnce(response(JSON.stringify(sample())));vi.stubGlobal('fetch',fetcher);
   await extractMeal({...env,MEAL_MODEL:undefined},image,expected);const body=JSON.parse(fetcher.mock.calls[1][1].body);
@@ -80,9 +80,29 @@ describe('strict observed meal validation',()=>{
   vi.stubGlobal('fetch',vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({data:[metadata()]}))).mockRejectedValueOnce(new Error('network secret')));
   const unknown=await extractMeal(env,image,expected).catch(e=>e);expect(unknown.safeRetry).toBe(false);expect(unknown.message).not.toContain('secret');
  });
+ it('records only numeric quota diagnostics after a confirmed inference 429',async()=>{
+  const fetcher=vi.fn().mockResolvedValueOnce(Response.json({data:[metadata()]}))
+   .mockResolvedValueOnce(new Response('upstream-sensitive-body',{status:429,headers:{'X-RateLimit-Limit':'20','X-RateLimit-Remaining':'0','X-RateLimit-Reset':'not-numeric-secret','Retry-After':'30'}}))
+   .mockResolvedValueOnce(Response.json({data:{label:'profile-sensitive-label',free_model_daily_requests:{used:12,limit:1000,remaining:988}}}));
+  vi.stubGlobal('fetch',fetcher);
+  const error=await extractMeal(env,image,expected).catch(e=>e);
+  expect(error.safeRetry).toBe(true);expect(error.retryAfter).toBe(30);
+  expect(error.message).toContain('429 (inference; limit=20, remaining=0)');
+  expect(error.message).toContain('account daily used=12, limit=1000, remaining=988 (UTC)');
+  expect(error.message).not.toContain('sensitive');expect(error.message).not.toContain('secret');
+  expect(fetcher.mock.calls[2][0]).toBe('https://openrouter.ai/api/v1/key');
+ });
  it('classifies pre-inference metadata transport failure as safely retryable',async()=>{
   vi.stubGlobal('fetch',vi.fn().mockRejectedValue(new Error('network')));
   const error=await extractMeal(env,image,expected).catch(e=>e);expect(error).toBeInstanceOf(MealExtractionError);expect(error.safeRetry).toBe(true);expect(error.actualCost).toBeNull();
+ });
+ it('never exposes malformed metadata bodies or transport details in retry diagnostics',async()=>{
+  for(const response of [new Response('upstream-sensitive-body'),new Error('transport-sensitive-detail')]){
+   const fetcher=vi.fn();if(response instanceof Error)fetcher.mockRejectedValue(response);else fetcher.mockResolvedValue(response);
+   vi.stubGlobal('fetch',fetcher);
+   const error=await extractMeal(env,image,expected).catch(e=>e);
+   expect(error.safeRetry).toBe(true);expect(error.message).not.toContain('sensitive');expect(fetcher).toHaveBeenCalledTimes(1);
+  }
  });
  it('rejects free model without image or JSON output support',async()=>{vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify({data:[{...metadata(),architecture:{input_modalities:['text']},supported_parameters:[]}]}))));await expect(extractMeal(env,image,expected)).rejects.toThrow('lacks required');});
 });

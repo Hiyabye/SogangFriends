@@ -48,6 +48,27 @@ describe('reviewed schedules', () => {
     expect(dueReminders(rows, '2026-10-18')).toEqual([]);
     expect(rows[0].deadlineAt).toBeUndefined();
   });
+  it('reminds exam periods and events at their start without inventing end deadlines', () => {
+    const exam = entry({ id: 'exam', startDate: '2026-10-20', endDate: '2026-10-26', deadlineDate: undefined });
+    const event = entry({ id: 'registration', startDate: '2026-10-20', type: 'event', endDate: undefined, deadlineDate: undefined });
+    for (const [today, offset] of [['2026-10-13', 7], ['2026-10-19', 1], ['2026-10-20', 0]] as const) {
+      expect(dueReminders([exam, event], today).map(({ item, kind, date, offset: actual }) => [item.id, kind, date, actual])).toEqual([['exam', 'start', '2026-10-20', offset], ['registration', 'start', '2026-10-20', offset]]);
+    }
+    expect(dueReminders([exam], '2026-10-26')).toEqual([]);
+  });
+  it('reminds both application start and explicit deadline with no same-date duplication', () => {
+    const application = entry({ startDate: '2026-11-01', endDate: '2026-11-30', deadlineDate: '2026-11-30' });
+    expect(dueReminders([application], '2026-10-25')[0]).toMatchObject({kind:'start',date:'2026-11-01',offset:7});
+    expect(dueReminders([application], '2026-11-23')[0]).toMatchObject({kind:'deadline',date:'2026-11-30',offset:7});
+    const single = entry({ startDate:'2026-10-20' });
+    expect(dueReminders([single], '2026-10-20')).toHaveLength(1);
+    expect(dueReminders([single], '2026-10-20')[0].kind).toBe('deadline');
+    expect(dueReminders([entry({type:'deadline',startDate:'2026-10-01'})], '2026-10-01')).toEqual([]);
+  });
+  it('excludes unapproved and faculty start reminders too', () => {
+    const start = entry({startDate:'2026-10-20',deadlineDate:undefined});
+    expect(dueReminders([{...start,active:false},{...start,id:'faculty',note:'교직원 대상'}], '2026-10-13')).toEqual([]);
+  });
   it('maps explicit timestamp deadlines to KST dates but rejects ambiguous or invalid timestamps', () => {
     const row = entry({ deadlineDate: undefined, deadlineAt: '2026-10-19T15:00:00Z' });
     expect(validateSchedules([row])).toHaveLength(1);

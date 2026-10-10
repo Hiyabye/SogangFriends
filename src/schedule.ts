@@ -46,14 +46,19 @@ export function upcomingSchedules(items: Schedule[], today: string): Schedule[] 
     .sort((a, b) => a.startDate.localeCompare(b.startDate) || a.id.localeCompare(b.id));
 }
 
-/** Date-only deadlines stay date-only. Delivery deduplication belongs to the outbox. */
-export function dueReminders(items: Schedule[], today: string): { item: Schedule; offset: number }[] {
+/** Start dates are not deadlines; only explicitly documented deadlines get end reminders. */
+export function dueReminders(items: Schedule[], today: string): { item: Schedule; offset: number; kind: 'start' | 'deadline'; date: string }[] {
   if (!validDate(today)) throw new Error('Invalid reminder date');
   return items.flatMap(item => {
     if (item.active !== true || item.note.includes('교직원 대상')) return [];
     const deadline = deadlineDate(item);
-    if (!deadline) return [];
-    const offset = dayDifference(today, deadline);
-    return [7, 1, 0].includes(offset) ? [{ item, offset }] : [];
+    const targets: { kind: 'start' | 'deadline'; date: string }[] = [];
+    // One reminder if a period starts and ends on the same KST date.
+    if (item.type !== 'deadline' && item.startDate !== deadline) targets.push({ kind: 'start', date: item.startDate });
+    if (deadline) targets.push({ kind: 'deadline', date: deadline });
+    return targets.flatMap(({ kind, date }) => {
+      const offset = dayDifference(today, date);
+      return [7, 1, 0].includes(offset) ? [{ item, offset, kind, date }] : [];
+    });
   });
 }

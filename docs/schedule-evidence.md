@@ -37,7 +37,8 @@ Desktop and mobile HTML duplicate events; the seed includes each event once. Sta
 - `deadlineAt` is optional for future sources that explicitly give a timezone-aware clock time. Never add it merely because a date is present.
 - Scholarship/major-change/leave-return application period ends are treated as date-only application ends. Notes make this interpretation explicit.
 - Faculty grade-submission entries remain visible but are excluded from reminders: their note carries the explicit `교직원 대상` designation. Keep that designation when editing these entries.
-- Exam periods, semester openings, course-cart and registration events without a stated deadline do not produce deadline reminders.
+- Exam periods, semester openings, course-cart and registration events produce **start-date** reminders, not invented deadline reminders. Application periods with documented deadlines have separate start and deadline reminders; same-date targets are combined. Both use D-7, D-1 and D-day. Existing deadline delivery keys are preserved; start delivery keys have a separate identity.
+- User selected start-date plus deadline reminders on 2026-10-10. These reminders use reviewed calendar data only; no LLM calls or automatic calendar scraping occur.
 - `/schedule` window includes today and ongoing periods, excludes the day at today+30. D-7, D-1 and D-day use KST calendar dates; they do not claim a precise cutoff hour.
 
 ## Import and activation

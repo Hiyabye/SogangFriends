@@ -41,9 +41,21 @@ function base64(bytes:Uint8Array):string {let s='';for(let at=0;at<bytes.length;
 async function apiJson(url:string,options:RequestInit,timeout:number,limit:number):Promise<unknown> {
  const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),timeout);
  try{const response=await fetch(url,{...options,redirect:'manual',signal:controller.signal});
-  if(!response.ok){const delay=Number(response.headers.get('retry-after'));throw new MealExtractionError(`Model service HTTP ${response.status}`,null,response.status===429,response.status===429?(Number.isFinite(delay)&&delay>0?Math.min(delay,3600):60):undefined);}
-  if(!response.body)throw new Error('Empty model response');const reader=response.body.getReader();const decoder=new TextDecoder();let body='';let size=0;
-  for(;;){const {done,value}=await reader.read();if(done)break;size+=value.length;if(size>limit){await reader.cancel();throw new Error('Model response too large');}body+=decoder.decode(value,{stream:true});}body+=decoder.decode();return JSON.parse(body);
+  if(!response.ok){
+   const delay=Number(response.headers.get('retry-after'));
+   const stage=url.endsWith('/models')?'catalog':url.endsWith('/key')?'quota':'inference';
+   const limits=response.status===429?['limit','remaining','reset'].flatMap(name=>{
+    const value=response.headers.get(`x-ratelimit-${name}`);
+    return value!==null&&/^\d{1,15}$/.test(value)?[`${name}=${value}`]:[];
+   }):[];
+   throw new MealExtractionError(`Model service HTTP ${response.status} (${stage}${limits.length?`; ${limits.join(', ')}`:''})`,null,response.status===429,response.status===429?(Number.isFinite(delay)&&delay>0?Math.min(delay,3600):60):undefined);
+  }
+  if(!response.body)throw new MealExtractionError('Empty model response');const reader=response.body.getReader();const decoder=new TextDecoder();let body='';let size=0;
+  for(;;){const {done,value}=await reader.read();if(done)break;size+=value.length;if(size>limit){await reader.cancel();throw new MealExtractionError('Model response too large');}body+=decoder.decode(value,{stream:true});}body+=decoder.decode();
+  try{return JSON.parse(body);}catch{throw new MealExtractionError('Invalid model JSON');}
+ }catch(error){
+  if(error instanceof MealExtractionError)throw error;
+  throw new MealExtractionError('Model service transport failed');
  }finally{clearTimeout(timer);}
 }
 function freeModelPrices(metadata:Record<string,unknown>) {
@@ -62,7 +74,7 @@ function freeModelPrices(metadata:Record<string,unknown>) {
 export async function extractMeal(env:Env,image:{bytes:Uint8Array;mime:string},expected:Expected):Promise<{week:MealWeek;actualCost:number|null;model:string}> {
  if(!env.OPENROUTER_API_KEY||env.LLM_ENABLED!=='true')throw new MealExtractionError('Meal extraction disabled or key missing');
  if(image.bytes.length===0||image.bytes.length>5*1024*1024||!['image/jpeg','image/png'].includes(image.mime))throw new MealExtractionError('Invalid model image');
- const model=env.MEAL_MODEL??'google/gemma-4-31b-it:free';
+ const model=env.MEAL_MODEL??'google/gemma-4-26b-a4b-it:free';
  if(!model.endsWith(':free'))throw new MealExtractionError('Only :free OpenRouter models are permitted');
  let maxPrice:ReturnType<typeof freeModelPrices>;
  let responseFormat:unknown;
@@ -83,7 +95,18 @@ export async function extractMeal(env:Env,image:{bytes:Uint8Array;mime:string},e
   if(choice.finish_reason!=='stop'||typeof answer.content!=='string'||answer.refusal)throw new Error('Incomplete model extraction');
   return {week:validateMeal(JSON.parse(answer.content),expected),actualCost,model:typeof result.model==='string'?result.model:model};
  }catch(error){
-  if(error instanceof MealExtractionError)throw error;
+  if(error instanceof MealExtractionError){
+   if(error.safeRetry&&error.message.startsWith('Model service HTTP 429')){
+    // Read-only account counters help distinguish shared daily exhaustion from provider capacity.
+    // Never retain the key profile, error bodies, or arbitrary upstream messages.
+    try{
+     const profile=object(await apiJson('https://openrouter.ai/api/v1/key',{headers:{Authorization:`Bearer ${env.OPENROUTER_API_KEY}`}},10_000,16*1024));
+     const daily=object(object(profile.data).free_model_daily_requests);
+     if(['used','limit','remaining'].every(k=>typeof daily[k]==='number'&&Number.isSafeInteger(daily[k])&&Number(daily[k])>=0))error.message+=`; account daily used=${daily.used}, limit=${daily.limit}, remaining=${daily.remaining} (UTC)`;
+    }catch{/* Diagnostics must not replace the original safe rejection. */}
+   }
+   throw error;
+  }
   throw new MealExtractionError('Meal inference failed or output rejected',actualCost,false);
  }
 }
