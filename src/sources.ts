@@ -26,6 +26,11 @@ async function pace(): Promise<void> {
  const next = pacing.then(async () => { const wait = Math.max(0,1000-(Date.now()-lastStart)); if (wait) await new Promise(r=>setTimeout(r,wait)); lastStart=Date.now(); });
  pacing=next.catch(()=>{}); await next;
 }
+export class SourceHttpError extends Error {
+ readonly status:number;
+ retryAfter?:number;
+ constructor(status:number){super(`Source HTTP ${status}`);this.name='SourceHttpError';this.status=status;}
+}
 /** Bounds bytes while streaming, rather than trusting Content-Length. TLS uses platform defaults. */
 export async function sourceBytes(url: string, limit=2*1024*1024): Promise<{bytes:Uint8Array;type:string}> {
  const u = new URL(url); if (u.protocol !== 'https:' || !hosts.has(u.hostname) || u.username || u.password || u.port || u.hash) throw new Error('Disallowed source URL');
@@ -33,7 +38,7 @@ export async function sourceBytes(url: string, limit=2*1024*1024): Promise<{byte
  try {
   const response=await fetch(url,{redirect:'manual',signal:controller.signal,headers:{'User-Agent':'SogangFriendsBot/0.1 (bounded official-source collector)'}});
   if (!response.ok || !response.body) {
-   const error=new Error(`Source HTTP ${response.status}`) as Error & {retryAfter?:number};
+   const error=new SourceHttpError(response.status);
    if(response.status===429){const seconds=Number(response.headers.get('retry-after'));error.retryAfter=Number.isFinite(seconds)&&seconds>0?Math.min(86400,seconds):60;}
    throw error;
   }
@@ -45,9 +50,10 @@ export async function sourceBytes(url: string, limit=2*1024*1024): Promise<{byte
  } finally {clearTimeout(timer);}
 }
 async function html(url:string):Promise<string> { const r=await sourceBytes(url); if(!r.type.includes('text/html'))throw new Error('Expected source HTML'); return new TextDecoder().decode(r.bytes); }
-export function parseUniversity(value: unknown, source: Source=SOURCES[0]): Notice[] {
+export function parseUniversity(value: unknown, source: Source=SOURCES[0], expectedPage=1): Notice[] {
+ if(!Number.isSafeInteger(expectedPage)||expectedPage<1)throw new Error('Invalid university page');
  const v=value as {statusCode?:unknown;data?:{list?:unknown;total?:unknown;pageNum?:unknown}};
- if(v?.statusCode!==200 || !v.data || !Array.isArray(v.data.list) || v.data.pageNum!==1 || typeof v.data.total!=='number' || v.data.total<0 || v.data.list.length>50 || (!v.data.list.length && v.data.total!==0)) throw new Error('Unexpected university response');
+ if(v?.statusCode!==200 || !v.data || !Array.isArray(v.data.list) || v.data.pageNum!==expectedPage || typeof v.data.total!=='number' || v.data.total<0 || v.data.list.length>50 || (!v.data.list.length && v.data.total!==0)) throw new Error('Unexpected university response');
  const ids=new Set<string>(); const notices:Notice[]=[]; let regular=0;
  for(const raw of v.data.list){const r=raw as Record<string,unknown>; if(!positive(r.pkId)||r.configId!==2||typeof r.regDate!=='string'||!/^\d{14}$/.test(r.regDate)||!['Y','N'].includes(String(r.isTop)))throw new Error('Invalid university row');
   const id=String(r.pkId);if(ids.has(id))throw new Error('Duplicate university identity');ids.add(id);if(r.isTop==='N')regular++;

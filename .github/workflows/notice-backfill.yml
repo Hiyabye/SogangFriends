@@ -1,0 +1,55 @@
+name: backfill notice archive
+on:
+  schedule:
+    - cron: '40 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      start:
+        description: Initialize missing backfill cursors (never resets existing progress)
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: notice-collector
+  cancel-in-progress: false
+jobs:
+  backfill:
+    if: ${{ vars.NOTICE_BACKFILL_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      NOTICE_INGEST_URL: ${{ vars.NOTICE_INGEST_URL || secrets.NOTICE_INGEST_URL }}
+      NOTICE_INGEST_SECRET: ${{ secrets.NOTICE_INGEST_SECRET }}
+      NOTICE_ARCHIVE_ENABLED: ${{ vars.NOTICE_ARCHIVE_ENABLED || 'false' }}
+      START_BACKFILL: ${{ inputs.start || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Validate explicitly enabled archive
+        run: |
+          if [[ "$NOTICE_ARCHIVE_ENABLED" != "true" || -z "$NOTICE_INGEST_URL" || -z "$NOTICE_INGEST_SECRET" ]]; then
+            echo "::error::Enable NOTICE_ARCHIVE_ENABLED and configure the ingestion URL and shared secret before backfill."
+            exit 1
+          fi
+      - run: npm ci
+      - name: Capture and notify recent notices before historical import
+        id: recent
+        continue-on-error: true
+        run: npm run notices:collect -- --send
+      - name: Resume at most six historical list pages
+        id: historical
+        run: |
+          if [[ "$START_BACKFILL" == "true" ]]; then
+            npm run notices:backfill -- --send --start
+          else
+            npm run notices:backfill -- --send
+          fi
+      - name: Report incomplete collection without blocking healthy archives
+        if: ${{ always() && (steps.recent.outcome == 'failure' || steps.historical.outcome == 'failure') }}
+        run: |
+          echo "::error::Recent collection or historical import was incomplete; durable progress is retained."
+          exit 1

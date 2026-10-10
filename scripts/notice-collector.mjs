@@ -60,15 +60,25 @@ export async function sendSnapshot(endpoint,snapshot,{fetcher=fetch,sleep=delay,
   await sleep(retryDelay(response,attempt,now()));
  }
 }
-export async function runCollector({send=false,endpoint,secret,collect=collectNotices,sources=SOURCES,upload=sendSnapshot,log=console.log}={}) {
+export async function runCollector({send=false,endpoint,secret,collect=collectNotices,sources=SOURCES,upload=sendSnapshot,log=console.log,archiveEnabled=false,capture}={}) {
  verifyCertificate();
  if(send){validateEndpoint(endpoint);if(typeof secret!=='string'||secret.length<32)throw new Error('NOTICE_INGEST_SECRET must contain at least 32 characters');}
+ if(send&&archiveEnabled&&!capture){
+  const {createArchiveClient,captureRawNotices}=await import('./notice-archive-client.mjs');
+  const {collectNoticeRaw}=await import('../src/notice-archive-sources.ts');
+  const client=createArchiveClient({endpoint,secret});
+  // Recent polling retains the source module's one-second pacing; backfill adds slower spacing.
+  capture=(source,notices)=>captureRawNotices(source,notices,{client,collectRaw:collectNoticeRaw,paceMs:0});
+ }
  let failed=0;
  for(const source of sources){
   let stage='collect';
   try{
    const notices=await collect(source);
-   if(send){stage='upload';await upload(endpoint,signedSnapshot(source.id,notices,secret));}
+   if(send){
+    if(archiveEnabled){stage='raw capture';const result=await capture(source,notices);if(result?.complete!==true)throw new Error('Raw capture incomplete');}
+    stage='upload';await upload(endpoint,signedSnapshot(source.id,notices,secret));
+   }
    log(`${source.id}: ${notices.length} notices ${send?'accepted':'collected (dry-run, not uploaded)'}`);
   }catch{
    failed++;log(`${source.id}: ${stage} failed; retained last-good stored data`);
@@ -76,11 +86,15 @@ export async function runCollector({send=false,endpoint,secret,collect=collectNo
  }
  return failed===0?0:1;
 }
-export async function main(args=process.argv.slice(2),env=process.env) {
- if(args.length>1||args.some(arg=>!['--send','--dry-run'].includes(arg)))throw new Error('Usage: npm run notices:collect -- [--dry-run | --send]');
+export function validateCollectorLaunch(env) {
  if(env.NODE_TLS_REJECT_UNAUTHORIZED==='0')throw new Error('TLS verification must remain enabled');
  if(!env.NODE_EXTRA_CA_CERTS||resolve(env.NODE_EXTRA_CA_CERTS)!==fileURLToPath(CERTIFICATE_URL))throw new Error('Launch with NODE_EXTRA_CA_CERTS=certificates/sogang-ov-r36.pem');
- return runCollector({send:args[0]==='--send',endpoint:env.NOTICE_INGEST_URL,secret:env.NOTICE_INGEST_SECRET});
+ verifyCertificate();
+}
+export async function main(args=process.argv.slice(2),env=process.env) {
+ if(args.length>1||args.some(arg=>!['--send','--dry-run'].includes(arg)))throw new Error('Usage: npm run notices:collect -- [--dry-run | --send]');
+ validateCollectorLaunch(env);
+ return runCollector({send:args[0]==='--send',endpoint:env.NOTICE_INGEST_URL,secret:env.NOTICE_INGEST_SECRET,archiveEnabled:env.NOTICE_ARCHIVE_ENABLED==='true'});
 }
 if(process.argv[1]&&pathToFileURL(resolve(process.argv[1])).href===import.meta.url){
  main().then(code=>{process.exitCode=code;}).catch(()=>{

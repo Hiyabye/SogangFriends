@@ -41,3 +41,20 @@ The user approved adding an independent Node/GitHub Actions collector and authen
 - `npm audit`: **0 vulnerabilities**. Wrangler dry-run packaged **397.28 KiB / 82.12 KiB gzip**; no deployment.
 - No new dependencies, remote migrations, Cloudflare resources, GitHub Secrets, command registration, push, workflow execution, inference or ingestion upload. GitHub Node 24 runner behavior and production ingestion completion remain unverified.
 - Latest local `wrangler.toml` selects external notice collection. Its pre-existing user-specific application/resource configuration remains uncommitted and preserved.
+
+## Subsequent Actions activation
+
+With explicit approval, pushed the URL-variable compatibility fix and ran Actions `37963706848` successfully. Read-only production D1 verification showed 215 notices across six initialized sources, no current source errors, and six completed snapshot jobs. This verifies ordinary recent ingestion, not the new raw archive.
+
+## Raw archive / slow backfill — local implementation
+
+User approved original article HTML + attachment/image links (no binaries), all six boards, private R2 files + existing D1 indexes, and deferring notice LLM processing.
+
+- `npm run check`: TypeScript and **154 tests across 12 files** passed. Coverage includes source/detail identity, original fragments, image-only content, inert Nuxt metadata parsing, valid terminal pages, raw-before-live ordering, signed archive acknowledgements, conditional first-object writes, R2-success/D1-failure reconciliation, atomic cursor rollback, fifty-row D1 query/binding limits, immutable KST start-day boundary, bounded retries, budget pauses and permanent historical HTTP404/410 markers versus transient failures.
+- Direct native Node import and a bounded verified-HTTPS probe succeeded: university page1 returned 50 entries; one body was 71,847 UTF-8 bytes. No upload. Additional bounded parser checks established all five college detail formats, representative file references and selected terminal pages, not a historical traversal.
+- Local Miniflare R2 conditional-put probe preserved the first object. Fake-R2 + real SQLite integration verifies coordination invariants, not remote R2/D1 operation.
+- `npm audit`: zero vulnerabilities. Final Wrangler dry-run packaged 407.67 KiB / 84.36 KiB gzip. No deployment.
+- Worker archive flag defaults false; new historical workflow is off without its separate Actions variable. No bucket creation, remote migration0003, archive deployment/upload, historical workflow execution, live backfill, binary downloads, notice model call or processed placeholder occurred.
+- Raw objects are first captures, not refreshed latest bodies. Historical attachment-layout changes can fail closed. Mutable upstream pagination does not guarantee an immutable snapshot. HTTP200 'not found' payloads are not inferred without verified official semantics.
+- Account free-model quota 1,000/day and 20/minute is recorded from the user's credit-purchase confirmation, not independently authenticated. Meal-specific limits remain unchanged; cross-feature model rate limiting is not implemented in this phase.
+- See [NOTICE-ARCHIVE.md](NOTICE-ARCHIVE.md) for separate activation gates, storage limits and pause/resume.

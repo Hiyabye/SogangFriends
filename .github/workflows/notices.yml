@@ -33,3 +33,4 @@ jobs:
         env:
           NOTICE_INGEST_URL: ${{ vars.NOTICE_INGEST_URL || secrets.NOTICE_INGEST_URL }}
           NOTICE_INGEST_SECRET: ${{ secrets.NOTICE_INGEST_SECRET }}
+          NOTICE_ARCHIVE_ENABLED: ${{ vars.NOTICE_ARCHIVE_ENABLED || 'false' }}

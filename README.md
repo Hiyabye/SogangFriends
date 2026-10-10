@@ -21,6 +21,8 @@ src/jobs.ts      Cron 계획 / Queue 소비 / 수집·추출·발송 분리
 src/storage.ts   D1 원자 claim·baseline·outbox·예산
 src/sources.ts   Node/Worker 공통 공식 목록 parser·식단 발견 (parse5)
 src/notice-ingest.ts 공지 snapshot HMAC 검증·입력 제한·Queue 접수
+src/notice-archive.ts R2 원문 저장 / D1 archive 인덱스·checkpoint
+src/notice-archive-sources.ts 상세 본문·첨부 링크 / 과거 페이지 검증
 src/meals.ts     OpenRouter 구조화 추출 / 의미 검증 / 표시
 src/time.ts     Asia/Seoul 날짜와 날짜-only 계산
 src/schedule.ts 사람이 검토하는 일정 계약 / 마감 선택
@@ -106,7 +108,7 @@ Cron은 15분마다 실행. `/status`의 `식단·Cron`에서 `id=cron`의 `last
 
 **OpenRouter는 무료 모델만 사용합니다. 유료 모델 및 유료 fallback은 금지합니다.** https://openrouter.ai/settings/keys 에서 이 앱 전용 키를 만드세요. 코드가 `:free` 접미사와 카탈로그의 모든 과금 항목이 0인지 확인하고, provider 가격 상한도 0으로 설정합니다. 조건 불일치 시 호출하지 않습니다. 키 credit limit도 추가 방어로 설정하세요.
 
-무료 요청 한도는 모든 계정에 무조건 1000회/일이 아닙니다. 현재 공식 안내는 기본 50회/일, $10 이상 credit 구매 시 1000회/일, 20회/분입니다. 계정의 실제 한도를 확인하세요. 한도를 늘리려는 credit 구매는 사용자 판단이며 봇은 credit 잔액이 있더라도 유료 모델을 사용하지 않습니다. [공식 안내](https://openrouter.ai/docs/api/reference/limits)
+무료 요청 한도는 모든 계정에 무조건 1000회/일이 아닙니다. 현재 공식 안내는 기본 50회/일, $10 이상 credit 구매 시 1000회/일, 20회/분입니다. 사용자는 $10 이상 credit 구매를 확인했으므로 현재 계정 한도는 **1000회/일·20회/분**입니다(`AGENTS.md`에도 기록). 식단과 이후 공지 가공 등 용도 간 공유 한도이며 기능마다 따로 1000회를 부여하지 않습니다. 현재 식단 하루2회 제한은 별도 설정으로 유지합니다. 봇은 credit 잔액이 있더라도 유료 모델을 사용하지 않습니다. [공식 안내](https://openrouter.ai/docs/api/reference/limits)
 
 - `MEAL_MODEL`: 기본 `google/gemma-4-31b-it:free`. 현재 public metadata상 image + response_format 지원, structured_outputs 미지원이므로 JSON mode 사용. schema는 prompt에 명시하고 코드 의미 검증은 동일하게 유지합니다. 무료 모델이 structured_outputs를 지원하면 strict schema로 요청합니다. 실제 식단 OCR 성능은 아직 검증하지 않았습니다.
 - `LLM_ENABLED=true`로 켜기 전 이미지 결과를 검토하세요. false/키 누락은 공지·일정·저장 식단 조회를 막지 않습니다.
@@ -164,34 +166,35 @@ npx wrangler d1 execute sogang-friends --remote --command="SELECT day,state,rese
 |---|---|
 | 학교 학사 | www.sogang.ac.kr 공식 BbsData boardList, bbsConfigFk=2; UI /ko/academic-support/notices |
 | 컴퓨팅 학사 | https://computing.sogang.ac.kr/ko/community/academicNotice/list?num=1 |
+| 컴퓨팅 대학원 | https://computing.sogang.ac.kr/ko/community/graduateNotice/list?num=1 |
+| 컴퓨팅 소식 | https://computing.sogang.ac.kr/ko/community/news/list?num=1 |
 | 컴퓨팅 대외정보 | https://computing.sogang.ac.kr/ko/community/externalInfo/list?num=1 |
 | 컴퓨팅 취업·인턴십 | https://computing.sogang.ac.kr/ko/community/career/list?num=1 |
 | 벨라르미노 | https://scc.sogang.ac.kr/front/cmsboardlist.do?bbsConfigFK=1185&siteId=dormitory&currentPage=1 |
 | 학사 일정 | https://www.sogang.ac.kr/ko/academic-support/calendar |
 
-수집은 최대 대학50개/컴퓨팅3페이지/식단2페이지, 게시물 본문 대량 수집 없음. 상세 수집은 식단 이미지 발견에만 필요. HTML/JSON2MiB, timeout20초, redirects 거부, 요청 간격1초. pacer는 isolate-local이므로 queue concurrency=1을 유지하세요; global 다중 배포 수집을 지원하는 distributed pacer는 없음.
+최근 수집은 대학50개/컴퓨팅3페이지/식단2페이지로 제한합니다. 원문 보관을 활성화하면 최근 목록 중 아직 보관하지 않은 공지의 상세 본문도 Node에서 수집합니다. 과거 backfill은 별도 기능으로 한 실행당 최대6개 목록 페이지, 추가3초 간격, 약7분 예산을 사용합니다. HTML/JSON2MiB, timeout20초, redirects 거부, 기본 요청 간격1초. 분산 수집 pacer는 없으므로 Actions의 공통 concurrency group을 유지하세요.
 
-본부 서버는 Node live 검증에서 중간 인증서 누락 때문에 `UNABLE_TO_VERIFY_LEAF_SIGNATURE`가 있었고 공용 intermediate CA를 추가하면 성공했습니다. **TLS 검증을 끄지 않았습니다.** Worker staging에서 실제 실패하는지는 아직 확인하지 않았습니다. 배포 승인 후 키 없이 공지 수집부터 제한 검증하세요. Workers에서도 실패한다면 원인을 다시 확인하고 **이 새 저장소 자체의 Actions 수집기 + 검증된 CA** 도입을 논의해야 합니다. 해당 fallback은 아직 구현하지 않았고 기존 Actions를 연결하지 않습니다.
+본부 중간 인증서 누락은 직접 Workers 수집에서 HTTP526으로 확인했습니다. 이 프로젝트의 독립 Node/Actions 수집기는 검증된 public intermediate CA를 사용해 6개 게시판의 수집·운영 업로드에 성공했습니다. **TLS 검증을 끄지 않았으며** 다른 저장소의 배포·피드에 의존하지 않습니다.
 
-## 공지 전체 이력 저장 — 가능성 및 현재 구현 경계
+## 공지 원문 보관과 전체 이력 backfill
 
-현재 `notices`는 `(source,id)` 복합 기본 키로 **수집한 목록을 누적 보관**하며 오래된 row를 삭제하지 않습니다. 학교 학사는 공식 `pkId`, 컴퓨팅은 `/detail/<숫자 ID>`를 사용합니다. 서로 다른 게시판의 같은 숫자는 충돌하지 않습니다. 식단 게시물은 공식 `pkid`가 있고, 메뉴는 적용 날짜로 구분합니다. 현재 `meals`는 날짜 범위와 7일 JSON을 원본 URL/이미지 해시/처리 버전별로 저장합니다. 날짜만으로 revision을 덮어쓰지 않습니다.
+`notices`는 `(source,id)`로 수집한 메타데이터를 누적하며 오래된 row를 삭제하지 않습니다. 학교 학사는 공식 `pkId`, 컴퓨팅은 `/detail/<ID>`를 사용하므로 게시판 간 ID 충돌은 없습니다.
 
-**과거 전체 페이지 backfill은 아직 구현되지 않았습니다.** 현재 수집 창은 최근 목록에 한정됩니다. 현재 TypeScript + Workers + Queues + D1 구성으로 전체 이력 수집이 가능하고, 별도 서비스나 기술 스택 교체는 필요하지 않습니다.
+**6개 게시판의 원문 보관·느린 1회 backfill을 구현했으며, 기본 비활성입니다.** [설정·운영 안내](docs/NOTICE-ARCHIVE.md)
 
-권장 다음 단계(미구현):
-1. 최근 목록 baseline을 먼저 확정하고, 관리자 승인으로만 과거 목록 backfill 시작.
-2. 페이지 하나씩 Queue 작업으로 수집하며 cursor/종료 상태를 D1에 저장. 요청 간격·응답 제한·전체 page/request 예산을 유지하고 중단 후 재개.
-3. backfill은 알림을 생성하지 않는 별도 저장 경로 사용. 이미 저장된 `(source,id)`는 UPSERT. 일상 polling은 최근 창만 수집하고 사용자 조회는 항상 D1을 읽음.
-4. `archive_runs` 등의 cursor migration 추가를 권장. 공지 본문 없이 제목/게시일/링크를 보관하는 데 현재 `notices` 스키마 변경은 필수 아님. first_seen/last_verified 필드는 운영 개선용으로 추가 가능.
-5. 날짜별 식단 검색/전체 이력을 확장하면 `meal_sources(post_id,source_url,...)`, `meal_days(source,date,revision,...)`와 원본 revision 관계를 명시하는 migration을 권장. 이미지 원본 파일까지 보관하려면 D1 blob이 아니라 R2 추가를 검토.
+- private R2 `raw/<source>/<id>.json`: 원본 본문 HTML, 첨부/이미지 링크, 수집 시각·해시. 파일 바이너리는 받지 않고 공지별 최초 원문 하나를 보관합니다. 수정 본문 이력이나 최신 원문 재검증을 보장하지 않습니다.
+- D1: 검색용 메타데이터, archive 인덱스, 게시판별 cursor. 과거 글을 저장해도 알림·baseline·최근 수집 상태를 변경하지 않습니다.
+- `processed/<source>/<id>.json`: 이후 실제 LLM 가공 결과를 위한 경로. 이번 단계에는 공지 모델 호출·가짜 결과·과거 전체 자동 요약이 없습니다.
+- 6시간마다 총6개 페이지 이내의 느린 backfill; 명시적 시작 후 재개 가능. 실제 저장 확인 전 cursor를 이동하지 않습니다. 직접 상세 HTTP404/410은 삭제 표시로 넘기고, 5xx·알 수 없는 형식은 재시도 대상으로 남깁니다.
+- 완료 후에는 최근 범위만 확인합니다. 공식 사이트에서 이미 삭제된 글은 복구하지 않습니다. 움직이는 페이지 순회이므로 특정 시점의 완벽한 snapshot은 보장하지 않습니다.
 
-전체 이력은 공식 사이트에 현재 공개된 범위만 회수할 수 있습니다. 한 번 backfill했다고 학교 요청이 영원히 0이 되지는 않습니다. 새 글·제목/링크 수정·식단 이미지 교체를 찾으려면 제한된 주기적 재확인이 필요합니다. 모든 과거 페이지를 매 갱신마다 다시 읽지 않는 것이 핵심입니다. 이 확장은 수집 범위와 저장 형식에 영향을 주므로 별도 승인 후 구현합니다.
+새 R2 bucket·migration0003·Worker/Actions feature flags가 필요합니다. **리소스 생성·원격 migration·배포·실제 backfill은 별도 승인 전 실행하지 않습니다.** 기존 식단의 이미지 해시/처리 버전 캐시는 그대로 두며 동일 날짜 수정 식단을 위한 별도 revision 구조는 추가하지 않습니다.
 
 ## 검증과 남은 제한
 
 `npm run check`는 fixture + 실제 Ed25519 + 실제 SQLite SQL 테스트. baseline/pins/upserts/last-good, 날짜·요일·만료, KST/D-day, permissions/guild scope, atomic claims/outbox/budget, ambiguous POST/429/expiry/token purge, bounded menus/mentions를 검증합니다. CI는 오프라인 검사와 dry-run bundle만 수행합니다.
 
-아직 검증하지 않은 것: 실제 Workers TLS, 운영 D1/Queue 서비스, Discord 게시/등록/권한, 유료 OpenRouter OCR·최종 청구, 운영 배포. dry-run은 배포가 아닙니다.
+운영 검증과 남은 한계는 [docs/VERIFICATION.md](docs/VERIFICATION.md)를 참고하세요. 새 raw archive의 운영 R2/D1 실행·전체 이력 완료·공지 LLM 처리는 아직 검증하지 않았습니다. dry-run은 배포가 아닙니다.
 
-다음 버전: staging 통합 테스트, 날짜별 식단 사람 승인/정확히 묶인 검토 override, decoded 이미지 pixel 제한, 안전한 관리자 reconciliation 도구, 장기 보관 정책, 분산 요청 pacing, 필요시 자체 TLS 검증 fallback, 공지 본문 요약(별도 상세 수집), 일정 정정 알림. 정확히 한 번 발송은 보장하지 않으며 Discord POST와 D1 기록은 비원자적입니다.
+다음 버전: staging 통합 테스트, 날짜별 식단 사람 승인/정확히 묶인 검토 override, decoded 이미지 pixel 제한, 안전한 관리자 reconciliation 도구, 장기 보관 정책, 분산 요청 pacing, 공지 원문 기반 실제 LLM 가공, 일정 정정 알림. 정확히 한 번 발송은 보장하지 않으며 Discord POST와 D1 기록은 비원자적입니다.
