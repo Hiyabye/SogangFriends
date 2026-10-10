@@ -34,7 +34,7 @@ Image-only notices retain original HTML and image references, **not image bytes*
 
 ## Activation — external changes require separate approval
 
-The checked-in Worker default is `NOTICE_ARCHIVE_ENABLED = "false"`. Existing notice polling continues without raw capture until activation. This D1 conversion does not itself apply remote migrations, deploy, enable Actions variables, dispatch a workflow or execute live backfill.
+Production activation was approved and verified on 2026-10-10: migrations 0003/0004 applied, 215 recent raw captures stored, and all six first historical pages committed. Backfill remains in progress, not complete. No card or R2 was used. The checked-in Worker default is `NOTICE_ARCHIVE_ENABLED = "false"`. Existing notice polling continues without raw capture until activation. This D1 conversion does not itself apply remote migrations, deploy, enable Actions variables, dispatch a workflow or execute live backfill.
 
 After separate operating approval:
 

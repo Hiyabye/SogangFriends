@@ -202,6 +202,6 @@ npx wrangler d1 execute sogang-friends --remote --command="SELECT day,state,rese
 
 `npm run check`는 fixture + 실제 Ed25519 + 실제 SQLite SQL 테스트. baseline/pins/upserts/last-good, 날짜·요일·만료, KST/D-day, permissions/guild scope, atomic claims/outbox/budget, ambiguous POST/429/expiry/token purge, bounded menus/mentions를 검증합니다. CI는 오프라인 검사와 dry-run bundle만 수행합니다.
 
-운영 검증과 남은 한계는 [docs/VERIFICATION.md](docs/VERIFICATION.md)를 참고하세요. 새 D1-only raw archive의 운영 migration·실제 저장·전체 이력 완료·공지 LLM 처리는 아직 검증하지 않았습니다. dry-run은 배포가 아닙니다.
+운영 검증과 남은 한계는 [docs/VERIFICATION.md](docs/VERIFICATION.md)를 참고하세요. 2026-10-10 사용자 승인으로 D1 archive migration·운영 배포·최근 원문215개 저장과 6개 보드 첫 backfill 페이지를 확인했습니다. Git의 기본 archive flag는 비활성이며 운영 설정/Actions에서는 활성화했습니다. 전체 이력 완료·공지 LLM 처리와 실제 식단 OCR 성공은 아직 확인하지 못했습니다. dry-run은 배포가 아닙니다.
 
 다음 버전: staging 통합 테스트, 날짜별 식단 사람 승인/정확히 묶인 검토 override, decoded 이미지 pixel 제한, 안전한 관리자 reconciliation 도구, 장기 보관 정책, 분산 요청 pacing, 공지 원문 기반 실제 LLM 가공, 일정 정정 알림. 정확히 한 번 발송은 보장하지 않으며 Discord POST와 D1 기록은 비원자적입니다.
