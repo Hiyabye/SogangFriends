@@ -60,7 +60,7 @@ function references(html:string,base:string):{attachments:string[];imageUrls:str
 // Never evaluate site JavaScript to obtain its attachment metadata.
 function pieces(input:string,delimiter=','):string[]{const out:string[]=[];let start=0,depth=0,quote='',escaped=false;for(let i=0;i<input.length;i++){const c=input[i];if(quote){if(escaped)escaped=false;else if(c==='\\')escaped=true;else if(c===quote)quote='';continue;}if(c==='"'||c==="'"){quote=c;continue;}if('([{'.includes(c))depth++;else if(')]}'.includes(c))depth--;else if(c===delimiter&&depth===0){out.push(input.slice(start,i).trim());start=i+1;}}if(quote||depth!==0)throw new Error('Invalid archive hydration');out.push(input.slice(start).trim());return out;}
 function block(input:string,start:number):string{const opener=input[start],closer=opener==='['?']':'}';let depth=0,quote='',escaped=false;for(let i=start;i<input.length;i++){const c=input[i];if(quote){if(escaped)escaped=false;else if(c==='\\')escaped=true;else if(c===quote)quote='';continue;}if(c==='"'||c==="'"){quote=c;continue;}if(c===opener)depth++;else if(c===closer&&--depth===0)return input.slice(start,i+1);}throw new Error('Invalid archive hydration block');}
-function hydration(input:string):{value:(token:string)=>unknown;object:(name:string)=>Record<string,unknown>;files:Record<string,unknown>[]} {
+function hydration(input:string):{value:(token:string)=>unknown;object:(name:string)=>Record<string,unknown>;routePath:()=>string;files:Record<string,unknown>[]} {
  const doc=parse(input);const scripts=all(doc,n=>tag(n,'script')).map(n=>all(n,x=>x.nodeName==='#text').map(x=>'value'in x?x.value:'').join('')).filter(s=>s.startsWith('window.__NUXT__='));
  if(scripts.length!==1)throw new Error('Missing archive hydration identity');const script=scripts[0].slice('window.__NUXT__='.length);
  const header=script.match(/^\(function\(([\w$,]*)\)\{/);if(!header)throw new Error('Unsupported archive hydration');
@@ -71,13 +71,14 @@ function hydration(input:string):{value:(token:string)=>unknown;object:(name:str
  const decode=(object:string)=>Object.fromEntries(pieces(object.slice(1,-1)).map(field=>{const m=field.match(/^([\w$]+):(.*)$/s);if(!m)throw new Error('Invalid archive hydration field');return [m[1],value(m[2])];}));
  const object=(name:string)=>{const m=new RegExp(`\\b${name}:\\{`).exec(script);if(!m)throw new Error('Missing archive hydration object');const fields=pieces(block(script,m.index+name.length+1).slice(1,-1));const id=fields.find(f=>/^SN:/.test(f));if(!id)throw new Error('Missing archive hydration identity');return {SN:value(id.slice(3))};};
  const fileMatch=/\bFILE_LIST:\[/.exec(script);const files=fileMatch?pieces(block(script,fileMatch.index+'FILE_LIST:'.length).slice(1,-1)).filter(Boolean).map(decode):[];
- return {value,object,files};
+ const routePath=()=>{const matches=[...script.matchAll(/\broutePath:([^,}]+)/g)];if(matches.length!==1)throw new Error('Missing archive route identity');const path=value(matches[0][1]);if(typeof path!=='string')throw new Error('Invalid archive route identity');return path;};
+ return {value,object,routePath,files};
 }
 export function parseNoticeRaw(input:string|unknown,notice:Notice):NoticeRaw {
  const source=identity(notice);
  if(source.kind==='university'){
   const response=input as {statusCode?:unknown;data?:Record<string,unknown>};const d=response?.data;
-  if(response?.statusCode!==200||!d||String(d.pkId)!==notice.id||d.configPkId!==2||typeof d.content!=='string'||d.title!==notice.title||typeof d.regDate!=='string'||!/^(?:\d{14}|\d{4}-\d{2}-\d{2}.*)$/.test(d.regDate))throw new Error('Wrong university archive detail');
+  if(response?.statusCode!==200||!d||String(d.pkId)!==notice.id||d.configPkId!==2||typeof d.content!=='string'||typeof d.title!=='string'||d.title.trim()!==notice.title||typeof d.regDate!=='string'||!/^(?:\d{14}|\d{4}-\d{2}-\d{2}.*)$/.test(d.regDate))throw new Error('Wrong university archive detail');
   const published=/^\d{14}$/.test(d.regDate)?`${d.regDate.slice(0,4)}-${d.regDate.slice(4,6)}-${d.regDate.slice(6,8)}`:d.regDate.slice(0,10);if(published!==notice.published)throw new Error('Changed university archive date');
   const refs=references(d.content,notice.url);for(let i=1;i<=5;i++){const f=d[`fileValue${i}`];if(f===null||f===undefined||f==='')continue;if(typeof f!=='string'||!/^https?:\/\/|^\//.test(f))throw new Error('Unresolved university attachment metadata');refs.attachments.push(link(f,notice.url));}
   return {notice,bodyHtml:d.content,attachments:[...new Set(refs.attachments)],imageUrls:refs.imageUrls};
@@ -86,12 +87,21 @@ export function parseNoticeRaw(input:string|unknown,notice:Notice):NoticeRaw {
  if(text(one(one(article,n=>cls(n,'board-detail-title-row')),n=>tag(n,'h3')))!==notice.title)throw new Error('Changed computing archive title');
  const meta=one(article,n=>cls(n,'board-detail-meta'));const dateRow=one(meta,n=>tag(n,'div')&&all(n,x=>tag(x,'dt')&&text(x)==='작성일').length===1);
  if(text(one(dateRow,n=>tag(n,'dd'))).replaceAll('.','-')!==notice.published)throw new Error('Changed computing archive date');
- const state=hydration(input);const detail=state.object('DETAIL');if(String(detail.SN)!==notice.id)throw new Error('Wrong computing archive detail identity');
+ const state=hydration(input);const detail=state.object('DETAIL');const detailId=String(detail.SN);
+ if(detailId!==notice.id){
+  // News exposes a public route ID distinct from its internal DETAIL.SN on newer posts.
+  // Keep the official route ID; require both canonical and hydrated route proof, plus
+  // the board/title/date checks above. Attachments name the internal parent but
+  // retain a public-ID file path; both are validated below.
+  if(source.id!=='news'||!/^[1-9]\d{0,19}$/.test(detailId))throw new Error('Wrong computing archive detail identity');
+  const canonical=one(doc,n=>tag(n,'link')&&attr(n,'rel').split(/\s+/).includes('canonical'));
+  if(attr(canonical,'href')!==notice.url||state.routePath()!==new URL(notice.url).pathname)throw new Error('Wrong computing archive route identity');
+ }
  const body=one(article,n=>cls(n,'board-detail-reading-area'));const loc='tagName'in body?body.sourceCodeLocation:null;if(!loc?.startTag||!loc.endTag)throw new Error('Missing original archive body offsets');
  const bodyHtml=input.slice(loc.startTag.endOffset,loc.endTag.startOffset);const refs=references(bodyHtml,notice.url);
  const buttons=all(article,n=>tag(n,'a')&&cls(n,'board-detail-file-download'));
  if(buttons.length!==state.files.length)throw new Error('Unresolved computing attachment metadata');
- for(let i=0;i<state.files.length;i++){const file=state.files[i];if(String(file.PARENT_SEQ)!==notice.id||file.FILE_PATH!==`community/${source.id}/${notice.id}/`||typeof file.SAVE_FILE_NAME!=='string'||!/^[\w.-]+$/.test(file.SAVE_FILE_NAME)||file.FILE_NAME!==attr(buttons[i],'title'))throw new Error('Wrong computing attachment identity');refs.attachments.push(`https://computing.sogang.ac.kr/web/file/${file.FILE_PATH}${file.SAVE_FILE_NAME}`);}
+ for(let i=0;i<state.files.length;i++){const file=state.files[i];if(String(file.PARENT_SEQ)!==detailId||file.FILE_PATH!==`community/${source.id}/${notice.id}/`||typeof file.SAVE_FILE_NAME!=='string'||!/^[\w.-]+$/.test(file.SAVE_FILE_NAME)||file.FILE_NAME!==attr(buttons[i],'title'))throw new Error('Wrong computing attachment identity');refs.attachments.push(`https://computing.sogang.ac.kr/web/file/${file.FILE_PATH}${file.SAVE_FILE_NAME}`);}
  return {notice,bodyHtml,attachments:[...new Set(refs.attachments)],imageUrls:refs.imageUrls};
 }
 export async function collectNoticeRaw(notice:Notice):Promise<NoticeRaw>{

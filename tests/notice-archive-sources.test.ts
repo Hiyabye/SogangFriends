@@ -67,6 +67,27 @@ describe('source-only notice archive',()=>{
   expect(()=>parseNoticeRaw({...input,data:{...input.data,pkId:124}},notice('university'))).toThrow('detail');
   expect(()=>parseNoticeRaw({...input,data:{...input.data,fileValue1:{fileId:1}}},notice('university'))).toThrow('Unresolved university');
  });
+ it('matches university detail titles using the same trim normalization as the list without changing original HTML',()=>{
+  const input=universityDetail();
+  expect(parseNoticeRaw({...input,data:{...input.data,title:' Synthetic notice '}},notice('university')).bodyHtml).toBe(input.data.content);
+  expect(()=>parseNoticeRaw({...input,data:{...input.data,title:'Different notice '}},notice('university'))).toThrow('detail');
+ });
+ it('proves news public route identity when the internal DETAIL SN differs, checking internal attachment parents and public paths',()=>{
+  const source=SOURCES.find(s=>s.id==='news')!,n=notice('news');
+  const body='\n<P data-original="1">Synthetic &amp; exact fragment</P>\n';
+  const canonical=`<link rel="canonical" href="${n.url}">`;
+  const route=JSON.stringify(new URL(n.url).pathname).replaceAll('/','\\u002F');
+  const input=canonical+detail(source,body).replace('DETAIL:{SN:a}','DETAIL:{SN:562}').replace('PARENT_SEQ:a','PARENT_SEQ:562').replace('return {data:[',`return {routePath:${route},data:[`);
+  expect(parseNoticeRaw(input,n)).toMatchObject({notice:n,bodyHtml:body,attachments:['https://computing.sogang.ac.kr/web/file/community/news/123/stored.pdf']});
+  expect(()=>parseNoticeRaw(input.replace(n.url,n.url.replace('/123','/124')),n)).toThrow('route identity');
+  expect(()=>parseNoticeRaw(input.replace('detail\\u002F123','detail\\u002F124'),n)).toThrow('route identity');
+  expect(()=>parseNoticeRaw(input.replace(canonical,''),n)).toThrow();
+  expect(()=>parseNoticeRaw(input.replace(`routePath:${route},`,''),n)).toThrow('route identity');
+  expect(()=>parseNoticeRaw(input.replace('SN:562','SN:-1'),n)).toThrow('detail identity');
+  expect(()=>parseNoticeRaw(input.replace('PARENT_SEQ:562','PARENT_SEQ:563'),n)).toThrow('attachment identity');
+  expect(()=>parseNoticeRaw(input.replace('community/news/123/','community/news/562/'),n)).toThrow('attachment identity');
+  expect(()=>parseNoticeRaw(detail(college,body).replace('DETAIL:{SN:a}','DETAIL:{SN:562}'),notice())).toThrow('detail identity');
+ });
  it('preserves populated university fileValue URL fields including Korean filename queries and deduplicates references',()=>{
   const input=universityDetail();
   const absolute='https://www.sogang.ac.kr/file-fe-prd/board/2/123_1.pdf?sg=검증 양식 1.pdf';
