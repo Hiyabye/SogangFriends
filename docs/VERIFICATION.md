@@ -106,3 +106,15 @@ One intervening fallback slot stopped before inference with the old generic diag
 No meal was stored and no Discord test post was made. Prior observed response costs accumulated to0, but that is not confirmation of the final uncertain request's usage or bill. Its $0.25 reservation remains reserved. No paid model or fallback was used. Exact transport cause and reasoning-token consumption are not recorded; reasoning consuming the answer budget is a hypothesis, not a measured fact.
 
 Local TypeScript and206 tests passed; npm audit reported zero vulnerabilities and diff check passed. New tests cover model-scoped prompt-only permission, unchanged normal caps, preservation of old reservations, third-run ceiling, preflight classification and no ambiguous replay. No new GitHub CI or code push is claimed for this iteration.
+
+## Reasoning-disabled trial and factual rejection — 2026-10-11 KST
+
+After renewed user approval, a fresh run used the same Dots/NVIDIA pair with reasoning.enabled=false, requiring live metadata reasoning support and mandatory=false. The new KST day used normal two-run/$0.50 caps, without an extra-run override; the earlier uncertain job/reservation was not replayed or released. Worker `2a02ac43-0858-4c10-b9d1-9466930e75e2` retained6000 tokens/120 seconds and the existing format/semantic checks.
+
+Dots attempt1 produced complete output but an uncertain/conflicting period; numeric usage was3552 completion tokens and0 reasoning tokens. Attempt2 produced schema-valid seven-day JSON, so the automatic sequence stopped and did not reach NVIDIA in this fresh trial. **This was not factual extraction success.** Visual comparison with the original941444 image confirmed invented Monday cup rice (this specific image lists it only Tuesday), fabricated Saturday dinner where the source cell is blank, and badly misread menu names. No fixed weekday rule was added.
+
+The user approved quarantining this exact derived result. Worker `2c5964ae-4788-4431-bf3b-ae2db2385ced` adds a private Queue operation using one atomic D1 batch: preserve the full derived JSON and provenance under extraction-job payload.rejectedExtraction, mark the extraction needs_review, then delete only its matching serving-cache row with audit proof. No schema, public route, service, reservation reset or model request is added by cleanup. Idempotent replay retains the audit; a SQLite abort-trigger test verifies rollback if deletion fails.
+
+Remote verification confirmed quarantine done, extraction audit preserved, original attempt count2 retained, and serving-meal count0. `/meal` therefore returns its official source fallback rather than this inaccurate menu. No Discord test post or paid inference was made. The older uncertain NVIDIA reservation remains preserved. This operator cleanup is not an automatic factual-quality gate for future extractions.
+
+TypeScript and214 tests passed; previous audit reported zero vulnerabilities, and final diff check passed. These source changes are locally committed/deployed; no new GitHub push or CI is claimed.

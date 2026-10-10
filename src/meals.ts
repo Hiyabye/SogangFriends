@@ -84,7 +84,7 @@ function freeModelPrices(metadata:Record<string,unknown>) {
  for(const key of Object.keys(pricing))if(price(key)!==0)throw new Error('Only zero-price free models are permitted');
  return {prompt:0,completion:0,image:0,request:0};
 }
-export async function extractMeal(env:Env,image:{bytes:Uint8Array;mime:string},expected:Expected,options:{allowPromptOnlyJson?:boolean}={}):Promise<{week:MealWeek;actualCost:number|null;model:string}> {
+export async function extractMeal(env:Env,image:{bytes:Uint8Array;mime:string},expected:Expected,options:{allowPromptOnlyJson?:boolean;disableReasoning?:boolean}={}):Promise<{week:MealWeek;actualCost:number|null;model:string}> {
  if(!env.OPENROUTER_API_KEY||env.LLM_ENABLED!=='true')throw new MealExtractionError('Meal extraction disabled or key missing');
  if(image.bytes.length===0||image.bytes.length>5*1024*1024||!['image/jpeg','image/png'].includes(image.mime))throw new MealExtractionError('Invalid model image');
  const model=env.MEAL_MODEL??MEAL_PRIMARY_MODEL;
@@ -96,6 +96,7 @@ export async function extractMeal(env:Env,image:{bytes:Uint8Array;mime:string},e
   const entry=Array.isArray(catalog.data)?catalog.data.find((r:unknown)=>object(r).id===model):undefined;
   if(!entry)throw new Error('Configured model not listed');const metadata=object(entry);const arch=object(metadata.architecture);const parameters=metadata.supported_parameters;
   if(!Array.isArray(arch.input_modalities)||!arch.input_modalities.includes('image')||!Array.isArray(parameters)||(!parameters.includes('response_format')&&options.allowPromptOnlyJson!==true))throw new Error('Configured model lacks required vision or JSON output support');
+  if(options.disableReasoning===true&&(!parameters.includes('reasoning')||object(metadata.reasoning).mandatory!==false))throw new Error('Configured model does not permit disabling reasoning');
   // The operator may authorize prompt-only JSON for one selected model; no validation is relaxed.
   responseFormat=parameters.includes('response_format')?(parameters.includes('structured_outputs')?{type:'json_schema',json_schema:{name:'bellarmine_week',strict:true,schema:MEAL_SCHEMA}}:{type:'json_object'}):undefined;
   maxPrice=freeModelPrices(metadata);
@@ -103,12 +104,14 @@ export async function extractMeal(env:Env,image:{bytes:Uint8Array;mime:string},e
  let actualCost:number|null=null;
  let responseSummary='';
  try {
-  const result=object(await apiJson('https://openrouter.ai/api/v1/chat/completions',{method:'POST',headers:{Authorization:`Bearer ${env.OPENROUTER_API_KEY}`,'Content-Type':'application/json'},body:JSON.stringify({model,provider:{require_parameters:true,max_price:maxPrice},temperature:0,max_tokens:6000,response_format:responseFormat,messages:[{role:'user',content:[{type:'text',text:`${PROMPT}\nRequired JSON schema (also applies in JSON mode): ${JSON.stringify(MEAL_SCHEMA)}`},{type:'image_url',image_url:{url:`data:${image.mime};base64,${base64(image.bytes)}`}}]}]})},120_000,512*1024));
+  const result=object(await apiJson('https://openrouter.ai/api/v1/chat/completions',{method:'POST',headers:{Authorization:`Bearer ${env.OPENROUTER_API_KEY}`,'Content-Type':'application/json'},body:JSON.stringify({model,provider:{require_parameters:true,max_price:maxPrice},temperature:0,max_tokens:6000,reasoning:options.disableReasoning===true?{enabled:false}:undefined,response_format:responseFormat,messages:[{role:'user',content:[{type:'text',text:`${PROMPT}\nRequired JSON schema (also applies in JSON mode): ${JSON.stringify(MEAL_SCHEMA)}`},{type:'image_url',image_url:{url:`data:${image.mime};base64,${base64(image.bytes)}`}}]}]})},120_000,512*1024));
   const usage=result.usage&&typeof result.usage==='object'&&!Array.isArray(result.usage)?result.usage as Record<string,unknown>:{};
   actualCost=typeof usage.cost==='number'&&Number.isFinite(usage.cost)&&usage.cost>=0?usage.cost:null;
   if(!Array.isArray(result.choices)||result.choices.length!==1)throw new Error('Invalid model choices');const choice=object(result.choices[0]);const answer=object(choice.message);
   const finish=['stop','length','tool_calls','function_call','content_filter','error'].includes(String(choice.finish_reason))?String(choice.finish_reason):'other';
   responseSummary=`; finish=${finish}, content_chars=${typeof answer.content==='string'?answer.content.length:0}`;
+  const details=usage.completion_tokens_details&&typeof usage.completion_tokens_details==='object'&&!Array.isArray(usage.completion_tokens_details)?usage.completion_tokens_details as Record<string,unknown>:{};
+  for(const [label,value] of [['completion_tokens',usage.completion_tokens],['reasoning_tokens',details.reasoning_tokens]] as const)if(typeof value==='number'&&Number.isSafeInteger(value)&&value>=0)responseSummary+=`, ${label}=${value}`;
   if(choice.finish_reason!=='stop'||typeof answer.content!=='string'||answer.refusal)throw new Error('Incomplete model extraction');
   let content:unknown;try{content=JSON.parse(answer.content);}catch{throw new Error('Invalid answer JSON');}
   return {week:validateMeal(content,expected),actualCost,model:typeof result.model==='string'?result.model:model};

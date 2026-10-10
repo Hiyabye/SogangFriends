@@ -23,8 +23,30 @@ describe('strict observed meal validation',()=>{
   vi.stubGlobal('fetch',fetcher);const r=await extractMeal(env,image,expected);expect(r.actualCost).toBe(0);
   expect(fetcher.mock.calls[0][1].redirect).toBe('manual');expect(fetcher.mock.calls[1][1].redirect).toBe('manual');
   const body=JSON.parse(fetcher.mock.calls[1][1].body);expect(body.max_tokens).toBe(6000);expect(body.provider.require_parameters).toBe(true);
-  expect(body.provider.max_price).toEqual({prompt:0,completion:0,image:0,request:0});expect(body.response_format.json_schema.strict).toBe(true);
+  expect(body.provider.max_price).toEqual({prompt:0,completion:0,image:0,request:0});expect(body.response_format.json_schema.strict).toBe(true);expect(body).not.toHaveProperty('reasoning');
   expect(body.messages[0].content[1].image_url.url).toBe('data:image/jpeg;base64,/9j/');expect(body.messages[0].content[0].text).not.toContain(expected.start);
+ });
+ it('disables optional reasoning only when requested, preserving model-specific format and free routing',async()=>{
+  for(const id of ['dots-studio/dots-3-note-preview:free','nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free']){
+   const nvidia=id.startsWith('nvidia/');const model={...metadata(),id,reasoning:{mandatory:false},supported_parameters:nvidia?['reasoning','max_tokens','temperature']:[...metadata().supported_parameters,'reasoning']};
+   const fetcher=vi.fn().mockResolvedValueOnce(Response.json({data:[model]})).mockResolvedValueOnce(Response.json({choices:[{finish_reason:'stop',message:{content:JSON.stringify(sample())}}],usage:{cost:0}}));vi.stubGlobal('fetch',fetcher);
+   await extractMeal({...env,MEAL_MODEL:id},image,expected,{allowPromptOnlyJson:nvidia,disableReasoning:true});
+   const body=JSON.parse(fetcher.mock.calls[1][1].body);expect(body.reasoning).toEqual({enabled:false});expect(body.max_tokens).toBe(6000);expect(body.provider.max_price).toEqual({prompt:0,completion:0,image:0,request:0});
+   if(nvidia)expect(body).not.toHaveProperty('response_format');else expect(body.response_format.json_schema.strict).toBe(true);
+  }
+ });
+ it('refuses unsupported or mandatory reasoning disable requests before inference',async()=>{
+  for(const model of [{...metadata(),reasoning:{mandatory:false}},{...metadata(),supported_parameters:['reasoning','response_format'],reasoning:{mandatory:true}},{...metadata(),supported_parameters:['reasoning','response_format']}]){
+   const fetcher=vi.fn().mockResolvedValueOnce(Response.json({data:[model]}));vi.stubGlobal('fetch',fetcher);
+   await expect(extractMeal(env,image,expected,{disableReasoning:true})).rejects.toBeInstanceOf(MealExtractionError);expect(fetcher).toHaveBeenCalledTimes(1);
+  }
+ });
+ it('records only valid numeric token counters, never reasoning text or malformed counters',async()=>{
+  for(const usage of [{cost:0,completion_tokens:6000,completion_tokens_details:{reasoning_tokens:6000}},{cost:0,completion_tokens:'private-counter',completion_tokens_details:{reasoning_tokens:-1}}]){
+   const fetcher=vi.fn().mockResolvedValueOnce(Response.json({data:[metadata()]})).mockResolvedValueOnce(Response.json({choices:[{finish_reason:'length',message:{content:'',reasoning:'private-thoughts'}}],usage}));vi.stubGlobal('fetch',fetcher);
+   const error=await extractMeal(env,image,expected).catch(e=>e);expect(error.message).not.toContain('private');
+   if(typeof usage.completion_tokens==='number'){expect(error.message).toContain('completion_tokens=6000');expect(error.message).toContain('reasoning_tokens=6000');}else expect(error.message).not.toContain('tokens=');
+  }
  });
  it('does not follow catalog redirects or attempt inference after redirect rejection',async()=>{
   const fetcher=vi.fn().mockResolvedValue(new Response(null,{status:302,headers:{location:'https://example.com/untrusted'}}));vi.stubGlobal('fetch',fetcher);

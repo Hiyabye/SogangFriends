@@ -126,7 +126,7 @@ Cron은 15분마다 실행. `/status`의 `식단·Cron`에서 `id=cron`의 `last
 - 모델에는 inline image·JSON schema·추출 지시만 제공하고 임의 URL/Discord 관리 도구를 주지 않습니다.
 - 활성화 직후에는 일회성 발견 작업으로 추출·저장을 확인할 수 있습니다. 이 작업 자체는 Discord에 즉시 게시하지 않습니다. JSON mode/schema와 evidence는 정확성을 증명하지 않으며, 실제 원본 대조가 필요합니다.
 
-현재 수동 수정/승인 UI와 arbitrary menu override는 제공하지 않습니다. 이상한 정상 결과는 해당 D1 캐시를 비공개로 격리하고 원문을 확인해야 합니다. 검토 데이터 자동 적용은 다음 버전에서 post URL/hash/기간에 묶인 형식으로 추가합니다.
+현재 수동 수정/승인 UI와 arbitrary menu override는 제공하지 않습니다. 2026-10-11 reasoning을 끈 Dots 검증은 JSON 생성에는 성공했지만 원문 대조에서 메뉴 오독·빈 셀 내용 생성이 확인돼 사용하지 않았습니다. 운영자 전용 `meal-quarantine` Queue 작업은 해당 결과를 추출 작업 payload에 보존한 뒤 serving cache에서만 원자적으로 제거합니다. 자동 사실 검증 기능은 아니므로 JSON 통과만으로 메뉴 정확성을 보장하지 않습니다. 검토 데이터 자동 적용은 다음 버전에서 post URL/hash/기간에 묶인 형식으로 추가합니다.
 
 ## 5. 학사 일정 검토·초기화
 

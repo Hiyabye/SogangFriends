@@ -22,7 +22,65 @@ beforeEach(async()=>{
 });
 afterEach(()=>{db.close();vi.useRealTimers();vi.restoreAllMocks();});
 
+async function quarantineFixture() {
+ const owner=`extract:${payload.key}`;
+ await enqueue(db.env,owner,'meal-extract',payload);
+ db.sqlite.prepare("UPDATE jobs SET state='done',attempts=2 WHERE id=?").run(owner);
+ const insert=db.sqlite.prepare('INSERT INTO meals(cache_key,source_url,image_hash,version,start_date,end_date,data,extracted_at,verified_at,model) VALUES(?,?,?,?,?,?,?,?,?,?)');
+ for(const key of [payload.key,'unrelated-cache'])insert.run(key,payload.url,payload.hash,payload.version,payload.start,payload.end,JSON.stringify(week),'2026-10-10T14:29:00Z','2026-10-10T14:29:00Z',MEAL_PRIMARY_MODEL);
+ db.sqlite.prepare("INSERT INTO llm_usage(id,day,reserved_usd,actual_usd,state,created_at) VALUES(?,'2026-10-10',0.25,0,'completed','now')").run(owner);
+ db.sqlite.exec("INSERT INTO llm_usage(id,day,reserved_usd,state,created_at) VALUES('old-unknown','2026-10-10',0.25,'reserved','now'); INSERT INTO health(id,last_success) VALUES('meal','2026-10-09T13:00:00Z')");
+ return {owner,job:{id:'quarantine',kind:'meal-quarantine',payload:JSON.stringify({cacheKey:payload.key})} as Job};
+}
+
+describe('private meal quarantine',()=>{
+ it('atomically retains the exact result, removes only its serving cache, and permits lossless replay',async()=>{
+  const {owner,job}=await quarantineFixture();
+  const reservations=db.sqlite.prepare('SELECT * FROM llm_usage ORDER BY id').all();
+  const original=db.sqlite.prepare('SELECT payload FROM jobs WHERE id=?').get(owner)!.payload;
+  await executeJob(db.env,job);
+  const extraction=db.sqlite.prepare('SELECT * FROM jobs WHERE id=?').get(owner)!;
+  expect(extraction).toMatchObject({state:'needs_review',attempts:2,lease_until:null});
+  const stored=JSON.parse(String(extraction.payload));expect(stored.key).toBe(JSON.parse(String(original)).key);
+  expect(stored.rejectedExtraction).toMatchObject({cacheKey:payload.key,data:week,model:MEAL_PRIMARY_MODEL,sourceUrl:payload.url,imageHash:payload.hash,version:payload.version,startDate:payload.start,endDate:payload.end,extractedAt:'2026-10-10T14:29:00Z',verifiedAt:'2026-10-10T14:29:00Z',reason:'Meal failed source-image comparison; result quarantined'});
+  expect(stored.rejectedExtraction.reviewedAt).toBe(new Date().toISOString());
+  expect(db.sqlite.prepare('SELECT cache_key FROM meals ORDER BY cache_key').all()).toEqual([{cache_key:'unrelated-cache'}]);
+  const health=db.sqlite.prepare("SELECT * FROM health WHERE id='meal'").get()!;expect(health.last_success).toBe('2026-10-09T13:00:00Z');expect(health.error).toContain('quarantined');
+  vi.advanceTimersByTime(1000);await executeJob(db.env,job);
+  expect(db.sqlite.prepare('SELECT payload FROM jobs WHERE id=?').get(owner)!.payload).toBe(extraction.payload);
+  expect(db.sqlite.prepare('SELECT * FROM llm_usage ORDER BY id').all()).toEqual(reservations);expect(extractMeal).not.toHaveBeenCalled();
+ });
+ it('rolls the audit and health changes back when deleting the cache fails',async()=>{
+  const {owner,job}=await quarantineFixture();
+  const extraction=db.sqlite.prepare('SELECT * FROM jobs WHERE id=?').get(owner)!;
+  const health=db.sqlite.prepare("SELECT * FROM health WHERE id='meal'").get()!;
+  const reservations=db.sqlite.prepare('SELECT * FROM llm_usage ORDER BY id').all();
+  db.sqlite.exec("CREATE TRIGGER fail_quarantine BEFORE DELETE ON meals WHEN OLD.cache_key='fixture-key' BEGIN SELECT RAISE(ABORT,'simulated delete failure'); END");
+  await expect(executeJob(db.env,job)).rejects.toThrow('simulated delete failure');
+  expect(db.sqlite.prepare('SELECT * FROM jobs WHERE id=?').get(owner)).toEqual(extraction);
+  expect(db.sqlite.prepare("SELECT * FROM health WHERE id='meal'").get()).toEqual(health);
+  expect(db.sqlite.prepare('SELECT COUNT(*) n FROM meals').get()!.n).toBe(2);
+  expect(db.sqlite.prepare('SELECT * FROM llm_usage ORDER BY id').all()).toEqual(reservations);
+  db.sqlite.exec('DROP TRIGGER fail_quarantine');await executeJob(db.env,job);
+  expect(db.sqlite.prepare('SELECT COUNT(*) n FROM meals').get()!.n).toBe(1);
+ });
+ it.each(['missing','mismatched'])('refuses deletion without a matching extraction owner (%s)',async(mode)=>{
+  const {owner,job}=await quarantineFixture();
+  if(mode==='missing')db.sqlite.prepare('DELETE FROM jobs WHERE id=?').run(owner);
+  else db.sqlite.prepare('UPDATE jobs SET payload=? WHERE id=?').run(JSON.stringify({...payload,key:'wrong-key'}),owner);
+  await expect(executeJob(db.env,job)).rejects.toThrow('Meal quarantine not committed');
+  expect(db.sqlite.prepare('SELECT COUNT(*) n FROM meals').get()!.n).toBe(2);
+  expect(db.sqlite.prepare("SELECT error FROM health WHERE id='meal'").get()!.error).toBeNull();
+ });
+});
+
 describe('durable five-plus-five meal policy',()=>{
+ it('passes reasoning disable only for an explicitly flagged operator job',async()=>{
+  vi.mocked(extractMeal).mockRejectedValue(new MealExtractionError('Rejected',null,true));
+  await run();expect(vi.mocked(extractMeal).mock.lastCall![3]).not.toHaveProperty('disableReasoning');
+  db.sqlite.prepare("UPDATE jobs SET payload=? WHERE id='meal'").run(JSON.stringify({...payload,disableReasoning:true}));
+  vi.advanceTimersByTime(60000);await run();expect(vi.mocked(extractMeal).mock.lastCall![3]).toEqual({allowPromptOnlyJson:false,disableReasoning:true});
+ });
  it('retries image preflight failure without inference or a reservation, redacting source errors',async()=>{
   vi.spyOn(await import('../src/sources'),'fetchImage').mockRejectedValueOnce(new Error('private-upstream-body'));
   await run();expect(row().state).toBe('retry');expect(row().error).toContain('Meal image preflight failed');expect(row().error).not.toContain('private-upstream-body');

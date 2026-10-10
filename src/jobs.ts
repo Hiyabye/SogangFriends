@@ -86,12 +86,27 @@ export async function executeJob(env:Env,job:Job) {
  }
  const models=payload.models??[env.MEAL_MODEL??MEAL_PRIMARY_MODEL,env.MEAL_FALLBACK_MODEL??MEAL_FALLBACK_MODEL];
  const model=models[job.attempts<=MEAL_ATTEMPTS_PER_MODEL?0:1];
- const result=await extractMeal({...env,MEAL_MODEL:model},image,{start:payload.start,end:payload.end,published:payload.published},{allowPromptOnlyJson:payload.promptOnlyJsonModel===model});
+ const result=await extractMeal({...env,MEAL_MODEL:model},image,{start:payload.start,end:payload.end,published:payload.published},{allowPromptOnlyJson:payload.promptOnlyJsonModel===model,...(payload.disableReasoning===true?{disableReasoning:true}:{})});
  const at=nowIso();
  await env.DB.batch([
  env.DB.prepare('INSERT OR IGNORE INTO meals(cache_key,source_url,image_hash,version,start_date,end_date,data,extracted_at,verified_at,model) VALUES(?,?,?,?,?,?,?,?,?,?)').bind(payload.key,payload.url,image.hash,payload.version,payload.start,payload.end,JSON.stringify(result.week),at,at,result.model),
  env.DB.prepare("UPDATE llm_usage SET actual_usd=CASE WHEN ? IS NULL THEN actual_usd ELSE COALESCE(actual_usd,0)+? END,state='completed' WHERE id=?").bind(result.actualCost,result.actualCost,job.id),
  env.DB.prepare("INSERT INTO health(id,last_attempt,last_success,error) VALUES('meal',?,?,NULL) ON CONFLICT(id) DO UPDATE SET last_attempt=excluded.last_attempt,last_success=excluded.last_success,error=NULL").bind(at,at)]);
+ break;
+ }
+ case 'meal-quarantine': {
+ const key=payload.cacheKey;
+ if(typeof key!=='string'||!key)throw new Error('Invalid meal quarantine identity');
+ const owner=`extract:${key}`,at=nowIso(),reason='Meal failed source-image comparison; result quarantined';
+ // Keep the exact rejected result before removing it from the serving cache. The
+ // delete requires matching audit proof; one batch rolls all three changes back.
+ await env.DB.batch([
+ env.DB.prepare("UPDATE jobs SET payload=json_set(payload,'$.rejectedExtraction',json((SELECT json_object('cacheKey',cache_key,'data',json(data),'model',model,'sourceUrl',source_url,'imageHash',image_hash,'version',version,'startDate',start_date,'endDate',end_date,'extractedAt',extracted_at,'verifiedAt',verified_at,'reviewedAt',?,'reason',?) FROM meals WHERE cache_key=?))),state='needs_review',lease_until=NULL,error=? WHERE id=? AND kind='meal-extract' AND state='done' AND json_extract(payload,'$.key')=? AND json_type(payload,'$.rejectedExtraction') IS NULL AND EXISTS(SELECT 1 FROM meals WHERE cache_key=?)").bind(at,reason,key,reason,owner,key,key),
+ env.DB.prepare("DELETE FROM meals WHERE cache_key=? AND EXISTS(SELECT 1 FROM jobs WHERE id=? AND kind='meal-extract' AND state='needs_review' AND json_extract(payload,'$.rejectedExtraction.cacheKey')=meals.cache_key AND json_extract(payload,'$.rejectedExtraction.data')=json(meals.data))").bind(key,owner),
+ env.DB.prepare("INSERT INTO health(id,last_attempt,error) SELECT 'meal',?,? FROM jobs WHERE id=? AND kind='meal-extract' AND state='needs_review' AND json_extract(payload,'$.rejectedExtraction.cacheKey')=? AND NOT EXISTS(SELECT 1 FROM meals WHERE cache_key=?) ON CONFLICT(id) DO UPDATE SET last_attempt=excluded.last_attempt,error=excluded.error").bind(at,reason,owner,key,key)
+ ]);
+ const committed=await env.DB.prepare("SELECT id FROM jobs WHERE id=? AND kind='meal-extract' AND state='needs_review' AND json_extract(payload,'$.rejectedExtraction.cacheKey')=? AND NOT EXISTS(SELECT 1 FROM meals WHERE cache_key=?)").bind(owner,key,key).first();
+ if(!committed)throw new Error('Meal quarantine not committed');
  break;
  }
  case 'meal-daily': {
