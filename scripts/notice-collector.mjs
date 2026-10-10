@@ -76,7 +76,10 @@ export async function runCollector({send=false,endpoint,secret,collect=collectNo
   try{
    const notices=await collect(source);
    if(send){
-    if(archiveEnabled){stage='raw capture';const result=await capture(source,notices);if(result?.complete!==true)throw new Error('Raw capture incomplete');}
+    if(archiveEnabled){
+     try{const result=await capture(source,notices);if(result?.complete!==true)throw new Error('Raw capture incomplete');}
+     catch{failed++;log(`${source.id}: raw capture incomplete; submitting live metadata independently`);}
+    }
     stage='upload';await upload(endpoint,signedSnapshot(source.id,notices,secret));
    }
    log(`${source.id}: ${notices.length} notices ${send?'accepted':'collected (dry-run, not uploaded)'}`);

@@ -5,7 +5,6 @@ import {nowIso} from './storage';
 import {todayKst} from './time';
 const MAX_REQUEST=2*1024*1024,MAX_BODY=1024*1024;
 interface RawNotice {notice:Notice;bodyHtml:string;attachments:string[];imageUrls:string[]}
-interface StoredRaw extends RawNotice {version:1;capturedAt:string;contentHash:string}
 interface Progress {source:string;page:number;state:'active'|'done';updated_at:string;started_at:string}
 type ArchiveAction={action:'status'|'start'}|{action:'missing';source:string;ids:string[];includeUnavailable:boolean}|{action:'record';raw:RawNotice}|{action:'unavailable';notice:Notice;status:404|410}|{action:'commit';source:string;page:number;ids:string[];done:boolean};
 const object=(v:unknown):Record<string,unknown>=>{if(!v||typeof v!=='object'||Array.isArray(v))throw new Error('Invalid archive payload');return v as Record<string,unknown>;};
@@ -21,7 +20,13 @@ function validateRaw(value:unknown):RawNotice {
  const raw=object(value),n=object(raw.notice);
  const notice=validateNoticeSnapshot({source:n.source,notices:[n]}).notices[0];
  if(typeof raw.bodyHtml!=='string'||new TextEncoder().encode(raw.bodyHtml).length>MAX_BODY)throw new Error('Invalid raw body');
- return {notice,bodyHtml:raw.bodyHtml,attachments:references(raw.attachments),imageUrls:references(raw.imageUrls)};
+ const validated={notice,bodyHtml:raw.bodyHtml,attachments:references(raw.attachments),imageUrls:references(raw.imageUrls)};
+ // D1's row maximum is 2,000,000 bytes, not 2 MiB. Leave space for SQLite row headers,
+ // identity/hash/timestamp columns; body HTML is stored as TEXT, not escaped JSON.
+ const bytes=new TextEncoder();
+ const rowBytes=bytes.encode(validated.bodyHtml).length+bytes.encode(JSON.stringify(notice)).length+bytes.encode(JSON.stringify(validated.attachments)).length+bytes.encode(JSON.stringify(validated.imageUrls)).length;
+ if(rowBytes>1_900_000)throw new Error('Archive raw row exceeds D1 size limit');
+ return validated;
 }
 function action(value:unknown):ArchiveAction {
  const v=object(value);
@@ -43,7 +48,7 @@ function action(value:unknown):ArchiveAction {
 async function missing(env:Env,source:string,list:string[],includeUnavailable=false):Promise<string[]> {
  if(!list.length)return [];
  // Requested IDs drive indexed probes; neither source history nor the ID bindings are duplicated.
- const sql=`WITH requested(id) AS (VALUES ${list.map(()=>'(?)').join(',')}) SELECT id FROM requested WHERE EXISTS(SELECT 1 FROM notice_archive WHERE source=? AND notice_archive.id=requested.id)${includeUnavailable?' OR EXISTS(SELECT 1 FROM notice_archive_unavailable WHERE source=? AND notice_archive_unavailable.id=requested.id)':''}`;
+ const sql=`WITH requested(id) AS (VALUES ${list.map(()=>'(?)').join(',')}) SELECT id FROM requested WHERE EXISTS(SELECT 1 FROM notice_archive JOIN notice_archive_raw USING(source,id) WHERE source=? AND notice_archive.id=requested.id)${includeUnavailable?' OR EXISTS(SELECT 1 FROM notice_archive_unavailable WHERE source=? AND notice_archive_unavailable.id=requested.id)':''}`;
  const rows=await env.DB.prepare(sql).bind(...list,source,...(includeUnavailable?[source]:[])).all<{id:string}>();
  const present=new Set(rows.results.map(row=>row.id));return list.filter(id=>!present.has(id));
 }
@@ -53,19 +58,25 @@ async function hash(raw:RawNotice):Promise<string> {
 }
 async function record(env:Env,raw:RawNotice):Promise<Response> {
  const {notice}=raw,key=`raw/${notice.source}/${notice.id}.json`;
- const existing=await env.DB.prepare('SELECT raw_key FROM notice_archive WHERE source=? AND id=?').bind(notice.source,notice.id).first<{raw_key:string}>();
- if(existing)return Response.json({recorded:false,key:existing.raw_key});
- let stored:StoredRaw={version:1,...raw,capturedAt:nowIso(),contentHash:await hash(raw)};
- // Conditional put also protects an orphan from a previous R2-success/D1-failure attempt.
- const result=await env.NOTICE_ARCHIVE!.put(key,JSON.stringify(stored),{onlyIf:new Headers({'If-None-Match':'*'}),httpMetadata:{contentType:'application/json; charset=utf-8'}});
- if(!result){
-  const first=await env.NOTICE_ARCHIVE!.get(key);if(!first)throw new Error('Archive object unavailable');
-  const value=object(await first.json());const original=validateRaw(value);
-  if(value.version!==1||original.notice.source!==notice.source||original.notice.id!==notice.id||typeof value.capturedAt!=='string'||!Number.isFinite(Date.parse(value.capturedAt))||value.contentHash!==await hash(original))throw new Error('Archive object invalid');
-  stored={version:1,...original,capturedAt:value.capturedAt,contentHash:String(value.contentHash)};
+ const lookup=await env.DB.prepare('SELECT raw_key,notice_archive_raw.id AS body_id FROM notice_archive LEFT JOIN notice_archive_raw USING(source,id) WHERE source=? AND id=?').bind(notice.source,notice.id).all<{raw_key:string;body_id:string|null}>();
+ const existing=lookup.results[0];
+ if(existing){
+  // 0004 does not migrate pre-existing R2 captures. Never acknowledge an index-only
+  // legacy row or silently replace its original capture with a newly fetched body.
+  if(!existing.body_id)throw new Error('Archive body migration required');
+  return Response.json({recorded:false,key:existing.raw_key});
  }
- const n=stored.notice;
- await env.DB.prepare('INSERT OR IGNORE INTO notice_archive(source,id,title,published,url,raw_key,content_hash,captured_at) VALUES(?,?,?,?,?,?,?,?)').bind(n.source,n.id,n.title,n.published,n.url,key,stored.contentHash,stored.capturedAt).run();
+ // Leave 100 MB of the Free database for live notices, meals and delivery state.
+ // Use supported D1 metadata, not unsupported database-size PRAGMAs.
+ const size=lookup.meta.size_after;
+ if(!Number.isFinite(size)||size<0||size>=400_000_000)return new Response('Archive capacity reached; live bot headroom preserved',{status:503});
+ const at=nowIso(),contentHash=await hash(raw);
+ // The first committed row wins. Derive the index from that winning row, not this request,
+ // so concurrent captures cannot pair one body with another request's hash/metadata.
+ await env.DB.batch([
+  env.DB.prepare('INSERT OR IGNORE INTO notice_archive_raw(source,id,notice_json,body_html,attachments_json,image_urls_json,content_hash,captured_at) VALUES(?,?,?,?,?,?,?,?)').bind(notice.source,notice.id,JSON.stringify(notice),raw.bodyHtml,JSON.stringify(raw.attachments),JSON.stringify(raw.imageUrls),contentHash,at),
+  env.DB.prepare("INSERT OR IGNORE INTO notice_archive(source,id,title,published,url,raw_key,content_hash,captured_at) SELECT source,id,json_extract(notice_json,'$.title'),json_extract(notice_json,'$.published'),json_extract(notice_json,'$.url'),?,content_hash,captured_at FROM notice_archive_raw WHERE source=? AND id=?").bind(key,notice.source,notice.id)
+ ]);
  // Do not insert into notices here: a live snapshot must still see new IDs and create alerts.
  return Response.json({recorded:true,key});
 }
@@ -85,7 +96,7 @@ async function commit(env:Env,input:Extract<ArchiveAction,{action:'commit'}>):Pr
  return Response.json({committed:true,replayed:false,page:final.page,state:final.state});
 }
 export async function handleNoticeArchive(request:Request,env:Env):Promise<Response> {
- if(env.NOTICE_ARCHIVE_ENABLED!=='true'||!env.NOTICE_ARCHIVE||!env.NOTICE_INGEST_SECRET||env.NOTICE_INGEST_SECRET.length<32)return new Response('Notice archive disabled',{status:503});
+ if(env.NOTICE_ARCHIVE_ENABLED!=='true'||!env.NOTICE_INGEST_SECRET||env.NOTICE_INGEST_SECRET.length<32)return new Response('Notice archive disabled',{status:503});
  const verified=await verifyCollectorRequest(request,env.NOTICE_INGEST_SECRET,MAX_REQUEST);if(verified instanceof Response)return verified;
  let input:ArchiveAction;
  try{input=action(JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(verified.body)));}catch{return new Response('Invalid archive payload',{status:400});}

@@ -21,7 +21,7 @@ src/jobs.ts      Cron 계획 / Queue 소비 / 수집·추출·발송 분리
 src/storage.ts   D1 원자 claim·baseline·outbox·예산
 src/sources.ts   Node/Worker 공통 공식 목록 parser·식단 발견 (parse5)
 src/notice-ingest.ts 공지 snapshot HMAC 검증·입력 제한·Queue 접수
-src/notice-archive.ts R2 원문 저장 / D1 archive 인덱스·checkpoint
+src/notice-archive.ts D1 원문 저장 / archive 인덱스·checkpoint
 src/notice-archive-sources.ts 상세 본문·첨부 링크 / 과거 페이지 검증
 src/meals.ts     OpenRouter 구조화 추출 / 의미 검증 / 표시
 src/time.ts     Asia/Seoul 날짜와 날짜-only 계산
@@ -188,18 +188,20 @@ npx wrangler d1 execute sogang-friends --remote --command="SELECT day,state,rese
 
 **6개 게시판의 원문 보관·느린 1회 backfill을 구현했으며, 기본 비활성입니다.** [설정·운영 안내](docs/NOTICE-ARCHIVE.md)
 
-- private R2 `raw/<source>/<id>.json`: 원본 본문 HTML, 첨부/이미지 링크, 수집 시각·해시. 파일 바이너리는 받지 않고 공지별 최초 원문 하나를 보관합니다. 수정 본문 이력이나 최신 원문 재검증을 보장하지 않습니다.
-- D1: 검색용 메타데이터, archive 인덱스, 게시판별 cursor. 과거 글을 저장해도 알림·baseline·최근 수집 상태를 변경하지 않습니다.
-- `processed/<source>/<id>.json`: 이후 실제 LLM 가공 결과를 위한 경로. 이번 단계에는 공지 모델 호출·가짜 결과·과거 전체 자동 요약이 없습니다.
+- **기존 D1만 사용**: `notice_archive_raw`에 원본 본문 HTML(TEXT), 공지 메타데이터·첨부/이미지 링크(JSON), 수집 시각·해시를 저장합니다. R2 bucket이나 Cloudflare 카드 등록은 필요 없습니다.
+- `raw/<source>/<id>.json`은 archive 인덱스의 **논리적 식별자**이며 실제 파일/폴더가 아닙니다. 원문과 인덱스는 하나의 D1 transaction으로 저장하고 공지별 최초 원문 하나만 보관합니다. 파일 바이너리, 수정 본문 이력, 최신 원문 재검증은 제공하지 않습니다.
+- D1의 검색용 메타데이터·게시판별 cursor는 그대로 유지합니다. 과거 글을 저장해도 알림·baseline·최근 수집 상태를 변경하지 않습니다.
+- `processed/`는 이후 실제 LLM 가공 결과를 별도로 보관할 단계의 이름입니다. 이번 단계에는 processed table·공지 모델 호출·가짜 결과·과거 전체 자동 요약이 없습니다.
+- Free D1은 **DB당500MB**, row당2,000,000byte 제한입니다. 원문 row의 본문·JSON 크기는1,900,000byte 이하로 검사합니다. 전체 과거 이력이500MB에 들어간다는 보장은 없으며 기존 작업·식단·일정도 같은 용량을 사용합니다. D1 응답의 DB 크기가400MB 이상이면 신규 원문 저장을 멈춰 bot 운영 용량을 남깁니다. 기존 원문 재접수는 허용하고 크기 metadata가 없으면 신규 저장은 중단합니다. 마지막 저장이나 동시 쓰기로400MB를 조금 넘을 수 있으므로 용량도 확인해야 합니다.
 - 6시간마다 총6개 페이지 이내의 느린 backfill; 명시적 시작 후 재개 가능. 실제 저장 확인 전 cursor를 이동하지 않습니다. 직접 상세 HTTP404/410은 삭제 표시로 넘기고, 5xx·알 수 없는 형식은 재시도 대상으로 남깁니다.
 - 완료 후에는 최근 범위만 확인합니다. 공식 사이트에서 이미 삭제된 글은 복구하지 않습니다. 움직이는 페이지 순회이므로 특정 시점의 완벽한 snapshot은 보장하지 않습니다.
 
-새 R2 bucket·migration0003·Worker/Actions feature flags가 필요합니다. **리소스 생성·원격 migration·배포·실제 backfill은 별도 승인 전 실행하지 않습니다.** 기존 식단의 이미지 해시/처리 버전 캐시는 그대로 두며 동일 날짜 수정 식단을 위한 별도 revision 구조는 추가하지 않습니다.
+기존 DB에 additive migration **0003·0004**와 Worker/Actions feature flags가 필요합니다. **원격 migration·배포·Actions 활성화·실제 backfill은 별도 운영 승인 전 실행하지 않습니다.** 새 저장소 서비스나 bucket은 만들지 않습니다. 기존 R2-only 인덱스가 있는 다른 환경은 별도 원문 import 없이 D1 보관 완료로 간주하지 않습니다. 기존 식단의 이미지 해시/처리 버전 캐시는 그대로 두며 동일 날짜 수정 식단을 위한 별도 revision 구조는 추가하지 않습니다.
 
 ## 검증과 남은 제한
 
 `npm run check`는 fixture + 실제 Ed25519 + 실제 SQLite SQL 테스트. baseline/pins/upserts/last-good, 날짜·요일·만료, KST/D-day, permissions/guild scope, atomic claims/outbox/budget, ambiguous POST/429/expiry/token purge, bounded menus/mentions를 검증합니다. CI는 오프라인 검사와 dry-run bundle만 수행합니다.
 
-운영 검증과 남은 한계는 [docs/VERIFICATION.md](docs/VERIFICATION.md)를 참고하세요. 새 raw archive의 운영 R2/D1 실행·전체 이력 완료·공지 LLM 처리는 아직 검증하지 않았습니다. dry-run은 배포가 아닙니다.
+운영 검증과 남은 한계는 [docs/VERIFICATION.md](docs/VERIFICATION.md)를 참고하세요. 새 D1-only raw archive의 운영 migration·실제 저장·전체 이력 완료·공지 LLM 처리는 아직 검증하지 않았습니다. dry-run은 배포가 아닙니다.
 
 다음 버전: staging 통합 테스트, 날짜별 식단 사람 승인/정확히 묶인 검토 override, decoded 이미지 pixel 제한, 안전한 관리자 reconciliation 도구, 장기 보관 정책, 분산 요청 pacing, 공지 원문 기반 실제 LLM 가공, 일정 정정 알림. 정확히 한 번 발송은 보장하지 않으며 Discord POST와 D1 기록은 비원자적입니다.

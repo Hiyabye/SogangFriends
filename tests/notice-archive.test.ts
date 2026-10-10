@@ -16,14 +16,15 @@ async function signed(value:unknown,key=secret,timestamp=String(Date.now())) {
 }
 function database(){
  vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(new Date('2026-10-09T17:00:00Z'));
- const db=testDatabase(),objects=new Map<string,string>();
- const bucket={
-  put:vi.fn(async(key:string,value:string,options:{onlyIf:Headers})=>{expect(options.onlyIf.get('If-None-Match')).toBe('*');if(objects.has(key))return null;objects.set(key,value);return {key};}),
-  get:vi.fn(async(key:string)=>objects.has(key)?{json:async()=>JSON.parse(objects.get(key)!)}:null)
- };
- db.env.NOTICE_ARCHIVE_ENABLED='true';db.env.NOTICE_ARCHIVE=bucket as unknown as R2Bucket;db.env.NOTICE_INGEST_SECRET=secret;
+ const db=testDatabase();
+ db.env.NOTICE_ARCHIVE_ENABLED='true';db.env.NOTICE_INGEST_SECRET=secret;
  const send=async(data:unknown)=>handleRequest(await signed(data),db.env);
- return {...db,objects,bucket,send};
+ return {...db,send,get objects(){
+  // Reconstruct the unchanged logical raw JSON format from actual D1 TEXT columns.
+  return new Map(db.sqlite.prepare('SELECT * FROM notice_archive_raw').all().map(row=>[
+   `raw/${row.source}/${row.id}.json`,JSON.stringify({version:row.version,notice:JSON.parse(String(row.notice_json)),bodyHtml:row.body_html,attachments:JSON.parse(String(row.attachments_json)),imageUrls:JSON.parse(String(row.image_urls_json)),capturedAt:row.captured_at,contentHash:row.content_hash})
+  ]));
+ }};
 }
 afterEach(()=>{vi.restoreAllMocks();vi.useRealTimers();});
 describe('private raw notice archive',()=>{
@@ -35,7 +36,7 @@ describe('private raw notice archive',()=>{
    expect((await handleRequest(await signed({action:'status'},secret,String(Date.now()-301000)),db.env)).status).toBe(401);
    const req=await signed({action:'status'});expect((await handleRequest(new Request(req.url,{method:'POST',headers:req.headers,body:'{"action":"start"}'}),db.env)).status).toBe(401);
    expect((await handleRequest(new Request(req.url),db.env)).status).toBe(404);
-   expect(db.bucket.put).not.toHaveBeenCalled();expect(db.sqlite.prepare('SELECT COUNT(*) AS n FROM notice_archive_progress').get()!.n).toBe(0);
+   expect(db.objects.size).toBe(0);expect(db.sqlite.prepare('SELECT COUNT(*) AS n FROM notice_archive_progress').get()!.n).toBe(0);
   }finally{db.close();}
  });
  it('starts six cursors once without resetting completed progress',async()=>{
@@ -49,14 +50,66 @@ describe('private raw notice archive',()=>{
    expect(db.sqlite.prepare("SELECT page,state,started_at,updated_at FROM notice_archive_progress WHERE source='news'").get()).toMatchObject({page:7,state:'done',started_at:'2026-10-09T17:00:00.000Z',updated_at:'2026-10-09T17:00:00.000Z'});
   }finally{db.close();}
  });
- it('stores exact inert original HTML in R2, only its index in D1, and preserves first capture',async()=>{
+ it('stores exact inert original HTML and index in D1 without an R2 binding, and preserves first capture',async()=>{
   const db=database();try{
    const input=raw();const r=await db.send({action:'record',raw:input});expect(r.status).toBe(200);expect(await r.json()).toEqual({recorded:true,key:'raw/university/1.json'});
    const stored=JSON.parse(db.objects.get('raw/university/1.json')!);expect(stored).toMatchObject({...input,version:1});expect(stored.contentHash).toMatch(/^[a-f0-9]{64}$/);expect(Number.isFinite(Date.parse(stored.capturedAt))).toBe(true);
    const row=db.sqlite.prepare('SELECT * FROM notice_archive').get()!;expect(row.raw_key).toBe('raw/university/1.json');expect(Object.keys(row)).not.toContain('bodyHtml');expect(row.content_hash).toBe(stored.contentHash);
    expect(await (await db.send({action:'record',raw:{...input,bodyHtml:'changed'}})).json()).toEqual({recorded:false,key:'raw/university/1.json'});
-   expect(db.bucket.put).toHaveBeenCalledTimes(1);expect(JSON.parse(db.objects.get('raw/university/1.json')!).bodyHtml).toBe(input.bodyHtml);
+   expect(db.objects.size).toBe(1);expect(JSON.parse(db.objects.get('raw/university/1.json')!).bodyHtml).toBe(input.bodyHtml);
    expect(await (await db.send({action:'missing',source:'university',ids:['1','2']})).json()).toEqual({missing:['2']});
+  }finally{db.close();}
+ });
+ it.each([400_000_000,499_000_000,undefined])('blocks new captures with database size metadata %s while preserving stored replays',async(size)=>{
+  const db=database();try{
+   expect((await db.send({action:'record',raw:raw()})).status).toBe(200);
+   const first=db.objects.get('raw/university/1.json');
+   const prepare=db.env.DB.prepare.bind(db.env.DB);
+   vi.spyOn(db.env.DB,'prepare').mockImplementation((sql:string)=>{
+    const statement=prepare(sql);
+    if(!sql.startsWith('SELECT raw_key,notice_archive_raw.id AS body_id'))return statement;
+    const bind=statement.bind.bind(statement);
+    statement.bind=(...values:unknown[])=>{
+     const bound=bind(...values),all=bound.all.bind(bound);
+     bound.all=(async()=>{const result=await all();return {...result,meta:{...result.meta,size_after:size}};}) as any;
+     return bound;
+    };
+    return statement;
+   });
+   expect((await db.send({action:'record',raw:raw('university','2')})).status).toBe(503);
+   expect(db.sqlite.prepare('SELECT COUNT(*) AS n FROM notice_archive_raw').get()!.n).toBe(1);
+   expect(db.sqlite.prepare('SELECT COUNT(*) AS n FROM notice_archive').get()!.n).toBe(1);
+   expect(await (await db.send({action:'record',raw:{...raw(),bodyHtml:'do not replace'}})).json()).toEqual({recorded:false,key:'raw/university/1.json'});
+   expect(db.objects.get('raw/university/1.json')).toBe(first);
+  }finally{db.close();}
+ });
+ it('allows a new raw capture below the database headroom threshold',async()=>{
+  const db=database();try{
+   const prepare=db.env.DB.prepare.bind(db.env.DB);
+   vi.spyOn(db.env.DB,'prepare').mockImplementation((sql:string)=>{
+    const statement=prepare(sql);
+    if(!sql.startsWith('SELECT raw_key,notice_archive_raw.id AS body_id'))return statement;
+    const bind=statement.bind.bind(statement);
+    statement.bind=(...values:unknown[])=>{
+     const bound=bind(...values),all=bound.all.bind(bound);
+     bound.all=(async()=>{const result=await all();return {...result,meta:{...result.meta,size_after:399_999_999}};}) as any;
+     return bound;
+    };
+    return statement;
+   });
+   expect((await db.send({action:'record',raw:raw()})).status).toBe(200);
+   expect(db.objects.size).toBe(1);expect(db.sqlite.prepare('SELECT COUNT(*) AS n FROM notice_archive').get()!.n).toBe(1);
+  }finally{db.close();}
+ });
+ it('does not acknowledge or replace a legacy index that has no D1 body',async()=>{
+  const db=database();try{
+   const input=notice();
+   db.sqlite.prepare('INSERT INTO notice_archive(source,id,title,published,url,raw_key,content_hash,captured_at) VALUES(?,?,?,?,?,?,?,?)').run(input.source,input.id,input.title,input.published,input.url,'raw/university/1.json','old-hash',new Date().toISOString());
+   expect(await (await db.send({action:'missing',source:'university',ids:['1']})).json()).toEqual({missing:['1']});
+   expect((await db.send({action:'record',raw:raw()})).status).toBe(503);
+   expect(db.objects.size).toBe(0);expect(db.sqlite.prepare('SELECT content_hash FROM notice_archive').get()!.content_hash).toBe('old-hash');
+   await db.send({action:'start'});
+   expect((await db.send({action:'commit',source:'university',page:1,ids:['1'],done:true})).status).toBe(409);
   }finally{db.close();}
  });
  it('raw recording does not swallow normal new-ID alerts',async()=>{
@@ -106,7 +159,7 @@ describe('private raw notice archive',()=>{
    expect(await (await db.send({action:'missing',source:'university',ids:['1','2','3']})).json()).toEqual({missing:['2','3']});
    expect(await (await db.send({action:'missing',source:'university',ids:['1','2','3'],includeUnavailable:true})).json()).toEqual({missing:['3']});
    expect((await db.send({action:'commit',source:'university',page:1,ids:['1','2'],done:true})).status).toBe(200);
-   expect(db.objects.size).toBe(1);expect(db.bucket.put).toHaveBeenCalledTimes(1);
+   expect(db.objects.size).toBe(1);
    expect(db.sqlite.prepare('SELECT id FROM notices').all()).toEqual([{id:'1'}]);
    expect(db.sqlite.prepare('SELECT COUNT(*) AS n FROM jobs').get()!.n).toBe(0);
    // A restored recent detail is still requested and can acquire a real raw object.
@@ -190,30 +243,53 @@ describe('private raw notice archive',()=>{
    expect(db.objects.size).toBe(0);
   }finally{db.close();}
  });
- it('keeps the cursor/index untouched after R2 failure',async()=>{
+ it('keeps the cursor/index untouched after D1 raw write failure',async()=>{
   const db=database();try{
-   await db.send({action:'start'});db.bucket.put.mockRejectedValueOnce(new Error('storage unavailable'));
+   await db.send({action:'start'});
+   db.sqlite.exec("CREATE TRIGGER reject_raw BEFORE INSERT ON notice_archive_raw BEGIN SELECT RAISE(ABORT,'fixture failure'); END;");
    expect((await db.send({action:'record',raw:raw()})).status).toBe(503);
    expect(db.sqlite.prepare('SELECT COUNT(*) AS n FROM notice_archive').get()!.n).toBe(0);
    expect((await db.send({action:'commit',source:'university',page:1,ids:['1'],done:true})).status).toBe(409);
    expect(db.sqlite.prepare("SELECT page FROM notice_archive_progress WHERE source='university'").get()!.page).toBe(1);
   }finally{db.close();}
  });
- it('reconciles an orphaned first R2 capture after a D1 write failure, including concurrent replay',async()=>{
+ it('rolls back raw and index together after an index failure, then retries the same payload',async()=>{
   const db=database();try{
-   const original=db.env.DB.prepare.bind(db.env.DB);let fail=true;
-   vi.spyOn(db.env.DB,'prepare').mockImplementation(sql=>{if(fail&&sql.startsWith('INSERT OR IGNORE INTO notice_archive(')){fail=false;return {bind:()=>({run:async()=>{throw new Error('D1 unavailable');}})} as any;}return original(sql);});
-   expect((await db.send({action:'record',raw:raw()})).status).toBe(503);expect(db.objects.size).toBe(1);
-   expect((await db.send({action:'record',raw:{...raw(),bodyHtml:'different after retry'}})).status).toBe(200);
-   expect(JSON.parse(db.objects.get('raw/university/1.json')!).bodyHtml).toBe(raw().bodyHtml);
-   expect(db.sqlite.prepare('SELECT content_hash FROM notice_archive').get()!.content_hash).toBe(JSON.parse(db.objects.get('raw/university/1.json')!).contentHash);
-   const results=await Promise.all([db.send({action:'record',raw:raw('news','2')}),db.send({action:'record',raw:{...raw('news','2'),bodyHtml:'second'}})]);
+   db.sqlite.exec("CREATE TRIGGER reject_index BEFORE INSERT ON notice_archive BEGIN SELECT RAISE(ABORT,'fixture failure'); END;");
+   expect((await db.send({action:'record',raw:raw()})).status).toBe(503);
+   expect(db.objects.size).toBe(0);expect(db.sqlite.prepare('SELECT COUNT(*) AS n FROM notice_archive').get()!.n).toBe(0);
+   expect(await (await db.send({action:'missing',source:'university',ids:['1']})).json()).toEqual({missing:['1']});
+   db.sqlite.exec('DROP TRIGGER reject_index');
+   expect((await db.send({action:'record',raw:raw()})).status).toBe(200);
+   const stored=JSON.parse(db.objects.get('raw/university/1.json')!);
+   expect(stored.bodyHtml).toBe(raw().bodyHtml);
+   expect(db.sqlite.prepare('SELECT content_hash FROM notice_archive').get()!.content_hash).toBe(stored.contentHash);
+  }finally{db.close();}
+ });
+ it('keeps the same first body, metadata and hash under concurrent capture and replay',async()=>{
+  const db=database();try{
+   const firstInput=raw('news','2'),secondInput={...firstInput,notice:{...firstInput.notice,title:'second title'},bodyHtml:'second'};
+   const results=await Promise.all([db.send({action:'record',raw:firstInput}),db.send({action:'record',raw:secondInput})]);
    expect(results.map(r=>r.status)).toEqual([200,200]);
-   // Either concurrent request may win the first conditional put after asynchronous hashing.
    const first=db.objects.get('raw/news/2.json')!;const stored=JSON.parse(first);
-   expect([raw('news','2').bodyHtml,'second']).toContain(stored.bodyHtml);
-   expect(db.sqlite.prepare("SELECT content_hash FROM notice_archive WHERE source='news' AND id='2'").get()!.content_hash).toBe(stored.contentHash);
-   await db.send({action:'record',raw:{...raw('news','2'),bodyHtml:'later replay'}});expect(db.objects.get('raw/news/2.json')).toBe(first);
+   expect([firstInput.bodyHtml,'second']).toContain(stored.bodyHtml);
+   expect(db.sqlite.prepare("SELECT content_hash,title FROM notice_archive WHERE source='news' AND id='2'").get()).toMatchObject({content_hash:stored.contentHash,title:stored.notice.title});
+   const encoded=new TextEncoder().encode(JSON.stringify({notice:stored.notice,bodyHtml:stored.bodyHtml,attachments:stored.attachments,imageUrls:stored.imageUrls}));
+   const digest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',encoded)),b=>b.toString(16).padStart(2,'0')).join('');
+   expect(stored.contentHash).toBe(digest);
+   expect(await (await db.send({action:'record',raw:{...firstInput,bodyHtml:'later replay'}})).json()).toEqual({recorded:false,key:'raw/news/2.json'});
+   expect(db.objects.get('raw/news/2.json')).toBe(first);expect(db.objects.size).toBe(1);
+  }finally{db.close();}
+ });
+ it('stores escape-heavy HTML as TEXT and rejects UTF-8 row bytes near the D1 hard limit',async()=>{
+  const db=database();try{
+   const input={...raw(),bodyHtml:'\n'.repeat(700000)};
+   expect((await db.send({action:'record',raw:input})).status).toBe(200);
+   expect(db.sqlite.prepare('SELECT body_html FROM notice_archive_raw').get()!.body_html).toBe(input.bodyHtml);
+   const link='https://example.test/'+ '한'.repeat(1960);
+   const oversized={...raw('university','2'),bodyHtml:'x'.repeat(1024*1024),attachments:Array(75).fill(link),imageUrls:Array(75).fill(link)};
+   expect((await db.send({action:'record',raw:oversized})).status).toBe(400);
+   expect(db.objects.size).toBe(1);expect(db.sqlite.prepare("SELECT COUNT(*) AS n FROM notice_archive WHERE id='2'").get()!.n).toBe(0);
   }finally{db.close();}
  });
  it('rolls back historical inserts if checkpoint update fails and supports a verified empty terminal page',async()=>{

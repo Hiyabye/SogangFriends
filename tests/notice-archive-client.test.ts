@@ -83,7 +83,7 @@ describe('recent collector archive gate',()=>{
   const capture=vi.fn(async(s:any)=>{events.push('raw:'+s.id);if(s.id==='university')throw new Error(secret);return {complete:true};});
   const log=vi.fn();
   expect(await runCollector({send:true,endpoint,secret,archiveEnabled:true,sources,collect:async(s:any)=>[{...notice,source:s.id}],upload,capture,log})).toBe(1);
-  expect(events).toEqual(['raw:university','raw:academicNotice','upload']);expect(upload).toHaveBeenCalledTimes(1);expect(log.mock.calls.flat().join('\n')).not.toContain(secret);
+  expect(events).toEqual(['raw:university','upload','raw:academicNotice','upload']);expect(upload).toHaveBeenCalledTimes(2);expect(log.mock.calls.flat().join('\n')).not.toContain(secret);
  });
  it('does not archive on collector dry-run even with archive enabled',async()=>{
   const capture=vi.fn(),upload=vi.fn();

@@ -13,7 +13,7 @@ ALLOWED_GUILDS = "REPLACE_GUILD_ID"
 SOURCE_INTERVAL_HOURS = "6"
 # Six-board Node collector supplies authenticated snapshots; Worker Cron remains for meals/schedules.
 NOTICE_COLLECTION_MODE = "external"
-# Configure a private NOTICE_ARCHIVE R2 binding before activating raw capture.
+# Apply D1 archive migrations 0003 + 0004 before separately approved activation.
 NOTICE_ARCHIVE_ENABLED = "false"
 MEAL_TIME_KST = "07:30"
 # Only :free models with verified zero pricing are permitted.

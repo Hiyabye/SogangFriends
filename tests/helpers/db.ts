@@ -18,7 +18,8 @@ export function testDatabase() {
    if(isRows) {
     const results=statement.all(...this.values as never[]);
     const changes=Number(sqlite.prepare('SELECT changes() AS count').get()!.count);
-    return {success:true,results,meta:{changes}};
+    const size_after=Number(sqlite.prepare('PRAGMA page_count').get()!.page_count)*Number(sqlite.prepare('PRAGMA page_size').get()!.page_size);
+    return {success:true,results,meta:{changes,size_after}};
    }
    const result=statement.run(...this.values as never[]);
    return {success:true,results:[],meta:{changes:Number(result.changes),last_row_id:Number(result.lastInsertRowid)}};

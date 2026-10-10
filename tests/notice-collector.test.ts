@@ -67,6 +67,33 @@ describe('standalone authenticated notice collector',()=>{
   const unused=vi.fn();await expect(runCollector({send:true,endpoint,secret:'short',collect:unused})).rejects.toThrow('32');expect(unused).not.toHaveBeenCalled();
   await expect(runCollector({send:true,endpoint:'http://unsafe',secret,collect:unused})).rejects.toThrow('URL');expect(unused).not.toHaveBeenCalled();
  });
+ it('captures raw before live upload when the archive is healthy',async()=>{
+  const events:string[]=[];
+  const collect=vi.fn(async(source:any)=>[{...row,source:source.id}]);
+  const capture=vi.fn(async(source:any)=>{events.push(`raw:${source.id}`);return {complete:true};});
+  const upload=vi.fn(async(_url:string,value:any)=>{events.push(`metadata:${JSON.parse(value.body).source}`);});
+  expect(await runCollector({send:true,endpoint,secret,collect,capture,upload,archiveEnabled:true,log:vi.fn()})).toBe(0);
+  expect(events).toEqual(SOURCES.flatMap(source=>[`raw:${source.id}`,`metadata:${source.id}`]));
+  expect(capture).toHaveBeenCalledTimes(6);expect(upload).toHaveBeenCalledTimes(6);
+ });
+ it.each(['incomplete','throws'])('submits all live snapshots but reports an incomplete run when raw capture %s',async(mode)=>{
+  const collect=vi.fn(async(source:any)=>[{...row,source:source.id}]);
+  const capture=vi.fn(async(source:any)=>{
+   if(source.id==='university'){
+    if(mode==='throws')throw new Error(`private source body ${secret}`);
+    return {complete:false};
+   }
+   return {complete:true};
+  });
+  const upload=vi.fn(async()=>{}),log=vi.fn();
+  expect(await runCollector({send:true,endpoint,secret,collect,capture,upload,archiveEnabled:true,log})).toBe(1);
+  expect(capture).toHaveBeenCalledTimes(6);expect(upload).toHaveBeenCalledTimes(6);
+  expect(upload.mock.calls.map((call:any)=>JSON.parse(call[1].body).source)).toEqual(SOURCES.map(source=>source.id));
+  const output=log.mock.calls.flat().join('\n');
+  expect(output).toContain('university: raw capture incomplete; submitting live metadata independently');
+  expect(output).toContain('university: 1 notices accepted');
+  expect(output).not.toContain('private source body');expect(output).not.toContain(secret);
+ });
  it('covers exactly the six approved source IDs and rejects insecure CLI launch settings',async()=>{
   expect(SOURCES.map(s=>s.id)).toEqual(['university','academicNotice','graduateNotice','externalInfo','news','career']);
   await expect(main(['--unknown'],{})).rejects.toThrow('Usage');

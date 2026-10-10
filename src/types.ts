@@ -4,7 +4,7 @@ export interface Env {
  ALLOWED_GUILDS?: string; OPENROUTER_API_KEY?: string; MEAL_MODEL?: string; MEAL_FALLBACK_MODEL?: string;
  PROCESSING_VERSION?: string; SOURCE_INTERVAL_HOURS?: string; MEAL_TIME_KST?: string;
  NOTICE_COLLECTION_MODE?: 'worker'|'external'; NOTICE_INGEST_SECRET?: string;
- NOTICE_ARCHIVE_ENABLED?: string; NOTICE_ARCHIVE?: R2Bucket;
+ NOTICE_ARCHIVE_ENABLED?: string;
  LLM_ENABLED?: string; LLM_DAILY_CALLS?: string; LLM_DAILY_BUDGET_USD?: string; LLM_MAX_CALL_USD?: string;
 }
 export interface Notice {id:string; source:string; title:string; published:string; url:string}
