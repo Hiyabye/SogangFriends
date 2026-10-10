@@ -71,7 +71,7 @@ async function commandContent(env:Env,i:Interaction):Promise<string> {
  const health=await env.DB.prepare('SELECT id,last_attempt,last_success,error FROM health').all();
  const jobs=await env.DB.prepare('SELECT state,COUNT(*) count FROM jobs WHERE kind!=\'interaction\' GROUP BY state').all();
  const deliveries=await env.DB.prepare('SELECT state,COUNT(*) count FROM deliveries WHERE guild_id=? GROUP BY state').bind(i.guild_id!).all();
- const usage=await env.DB.prepare('SELECT COUNT(*) calls,SUM(reserved_usd) reserved,SUM(actual_usd) actual FROM llm_usage WHERE day=?').bind(todayKst()).first();
+ const usage=await env.DB.prepare("SELECT COUNT(*) runs,SUM(reserved_usd) reserved,SUM(actual_usd) actual FROM llm_usage WHERE day=? AND state!='confirmed_rejected'").bind(todayKst()).first();
  return `서버 설정: ${JSON.stringify(guild)}\n수집: ${JSON.stringify(sources.results)}\n식단·Cron: ${JSON.stringify(health.results)}\n공유 작업: ${JSON.stringify(jobs.results)}\n이 서버 발송: ${JSON.stringify(deliveries.results)}\nLLM 오늘: ${JSON.stringify(usage)} (reserved=보수적 예약액, actual=응답 비용; 청구서 아님)\nneeds_review/uncertain은 자동 재발송하지 않습니다.`;
  }
  default: return '지원하지 않는 명령입니다.';

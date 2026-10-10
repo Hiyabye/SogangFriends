@@ -36,7 +36,7 @@ describe('strict observed meal validation',()=>{
   await expect(extractMeal({...env,MEAL_MODEL:'custom/model'},image,expected)).rejects.toThrow('Only :free');expect(fetcher).not.toHaveBeenCalled();
  });
  it('uses Gemma default JSON mode with explicit schema prompt and unchanged semantic validation',async()=>{
-  const free={...metadata(),id:'google/gemma-4-26b-a4b-it:free',supported_parameters:['response_format']};
+  const free={...metadata(),id:'google/gemma-4-31b-it:free',supported_parameters:['response_format']};
   const response=(content:string)=>new Response(JSON.stringify({choices:[{finish_reason:'stop',message:{content}}],usage:{cost:0}}));
   const fetcher=vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({data:[free]}))).mockResolvedValueOnce(response(JSON.stringify(sample())));vi.stubGlobal('fetch',fetcher);
   await extractMeal({...env,MEAL_MODEL:undefined},image,expected);const body=JSON.parse(fetcher.mock.calls[1][1].body);
@@ -71,7 +71,7 @@ describe('strict observed meal validation',()=>{
    {choices:[]}
   ]){
    vi.stubGlobal('fetch',vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({data:[metadata()]}))).mockResolvedValueOnce(new Response(JSON.stringify({...response,usage:{cost:.012}}))));
-   const error=await extractMeal(env,image,expected).catch(e=>e);expect(error).toBeInstanceOf(MealExtractionError);expect(error.actualCost).toBe(.012);expect(error.safeRetry).toBe(false);
+   const error=await extractMeal(env,image,expected).catch(e=>e);expect(error).toBeInstanceOf(MealExtractionError);expect(error.actualCost).toBe(.012);expect(error.safeRetry).toBe(true);
   }
  });
  it('retries confirmed 429 rejection but not ambiguous inference transport',async()=>{
@@ -91,6 +91,17 @@ describe('strict observed meal validation',()=>{
   expect(error.message).toContain('account daily used=12, limit=1000, remaining=988 (UTC)');
   expect(error.message).not.toContain('sensitive');expect(error.message).not.toContain('secret');
   expect(fetcher.mock.calls[2][0]).toBe('https://openrouter.ai/api/v1/key');
+ });
+ it('retries complete malformed JSON but not interrupted response transport or ambiguous server errors',async()=>{
+  for(const response of [new Response('complete invalid JSON'),new Response('rejected',{status:422})]){
+   const fetcher=vi.fn().mockResolvedValueOnce(Response.json({data:[metadata()]})).mockResolvedValueOnce(response);vi.stubGlobal('fetch',fetcher);
+   expect((await extractMeal(env,image,expected).catch(e=>e)).safeRetry).toBe(true);
+  }
+  for(const response of [new Response('ambiguous',{status:503}),new Response('timeout',{status:408}),new Response(new ReadableStream({start(controller){controller.enqueue(new TextEncoder().encode('{"partial":'));controller.error(new Error('sensitive interrupted body'));}}))]){
+   const fetcher=vi.fn().mockResolvedValueOnce(Response.json({data:[metadata()]})).mockResolvedValueOnce(response);vi.stubGlobal('fetch',fetcher);
+   const error=await extractMeal(env,image,expected).catch(e=>e);
+   expect(error.safeRetry).toBe(false);expect(error.message).not.toContain('sensitive');
+  }
  });
  it('classifies pre-inference metadata transport failure as safely retryable',async()=>{
   vi.stubGlobal('fetch',vi.fn().mockRejectedValue(new Error('network')));

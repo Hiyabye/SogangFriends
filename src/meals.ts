@@ -2,7 +2,17 @@ import type { Env, MealWeek, MealDay, Offering } from './types';
 
 const fields = ['breakfastKorean','breakfastWestern','breakfastCommon','cupRice','dinner','drinks'] as const;
 interface Expected {start:string;end:string;published:string}
-/** Metadata failures and explicit 429 rejections can be retried; an ambiguous inference cannot. */
+export const MEAL_ATTEMPTS_PER_MODEL = 5;
+export const MEAL_MAX_ATTEMPTS = 2 * MEAL_ATTEMPTS_PER_MODEL;
+export const MEAL_PRIMARY_MODEL = 'google/gemma-4-31b-it:free';
+export const MEAL_FALLBACK_MODEL = 'google/gemma-4-26b-a4b-it:free';
+export function mealRetryDelay(attempt:number,retryAfter=0):number {
+ const position=(attempt-1)%MEAL_ATTEMPTS_PER_MODEL;
+ // Start the fallback after one minute; each model then waits 1, 2, 4, 8 minutes.
+ const progressive=position===MEAL_ATTEMPTS_PER_MODEL-1?60:60*2**position;
+ return Math.ceil(Math.max(progressive,Number.isFinite(retryAfter)?retryAfter:0));
+}
+/** Confirmed rejections and completely received invalid outputs can retry; uncertain inference cannot. */
 export class MealExtractionError extends Error {
  constructor(message:string, public actualCost:number|null = null, public safeRetry = false, public retryAfter?:number) {
   super(message); this.name='MealExtractionError';
@@ -48,11 +58,14 @@ async function apiJson(url:string,options:RequestInit,timeout:number,limit:numbe
     const value=response.headers.get(`x-ratelimit-${name}`);
     return value!==null&&/^\d{1,15}$/.test(value)?[`${name}=${value}`]:[];
    }):[];
-   throw new MealExtractionError(`Model service HTTP ${response.status} (${stage}${limits.length?`; ${limits.join(', ')}`:''})`,null,response.status===429,response.status===429?(Number.isFinite(delay)&&delay>0?Math.min(delay,3600):60):undefined);
+   // A received 4xx (except request timeout) rejects the request; 5xx can hide executed inference.
+   const rejected=response.status>=400&&response.status<500&&response.status!==408;
+   const validDelay=Number.isFinite(delay)&&delay>0&&new Date(Date.now()+delay*1000).getUTCFullYear()<=9999;
+   throw new MealExtractionError(`Model service HTTP ${response.status} (${stage}${limits.length?`; ${limits.join(', ')}`:''})`,null,rejected,validDelay?delay:response.status===429?60:undefined);
   }
-  if(!response.body)throw new MealExtractionError('Empty model response');const reader=response.body.getReader();const decoder=new TextDecoder();let body='';let size=0;
+  if(!response.body)throw new MealExtractionError('Empty model response',null,true);const reader=response.body.getReader();const decoder=new TextDecoder();let body='';let size=0;
   for(;;){const {done,value}=await reader.read();if(done)break;size+=value.length;if(size>limit){await reader.cancel();throw new MealExtractionError('Model response too large');}body+=decoder.decode(value,{stream:true});}body+=decoder.decode();
-  try{return JSON.parse(body);}catch{throw new MealExtractionError('Invalid model JSON');}
+  try{return JSON.parse(body);}catch{throw new MealExtractionError('Invalid model JSON',null,true);}
  }catch(error){
   if(error instanceof MealExtractionError)throw error;
   throw new MealExtractionError('Model service transport failed');
@@ -74,7 +87,7 @@ function freeModelPrices(metadata:Record<string,unknown>) {
 export async function extractMeal(env:Env,image:{bytes:Uint8Array;mime:string},expected:Expected):Promise<{week:MealWeek;actualCost:number|null;model:string}> {
  if(!env.OPENROUTER_API_KEY||env.LLM_ENABLED!=='true')throw new MealExtractionError('Meal extraction disabled or key missing');
  if(image.bytes.length===0||image.bytes.length>5*1024*1024||!['image/jpeg','image/png'].includes(image.mime))throw new MealExtractionError('Invalid model image');
- const model=env.MEAL_MODEL??'google/gemma-4-26b-a4b-it:free';
+ const model=env.MEAL_MODEL??MEAL_PRIMARY_MODEL;
  if(!model.endsWith(':free'))throw new MealExtractionError('Only :free OpenRouter models are permitted');
  let maxPrice:ReturnType<typeof freeModelPrices>;
  let responseFormat:unknown;
@@ -107,7 +120,8 @@ export async function extractMeal(env:Env,image:{bytes:Uint8Array;mime:string},e
    }
    throw error;
   }
-  throw new MealExtractionError('Meal inference failed or output rejected',actualCost,false);
+  // apiJson completed before these JSON/schema/date errors: another response may be valid.
+  throw new MealExtractionError('Meal output rejected after complete response',actualCost,true);
  }
 }
 function clip(text:string,limit:number):string {

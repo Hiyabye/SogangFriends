@@ -1,7 +1,7 @@
 export interface Env {
  DB: D1Database; JOBS: Queue<{id:string}>;
  DISCORD_PUBLIC_KEY?: string; DISCORD_TOKEN?: string; DISCORD_APPLICATION_ID?: string;
- ALLOWED_GUILDS?: string; OPENROUTER_API_KEY?: string; MEAL_MODEL?: string;
+ ALLOWED_GUILDS?: string; OPENROUTER_API_KEY?: string; MEAL_MODEL?: string; MEAL_FALLBACK_MODEL?: string;
  PROCESSING_VERSION?: string; SOURCE_INTERVAL_HOURS?: string; MEAL_TIME_KST?: string;
  NOTICE_COLLECTION_MODE?: 'worker'|'external'; NOTICE_INGEST_SECRET?: string;
  NOTICE_ARCHIVE_ENABLED?: string; NOTICE_ARCHIVE?: R2Bucket;

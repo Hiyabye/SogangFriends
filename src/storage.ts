@@ -1,4 +1,5 @@
 import type { Env, Job, Notice } from './types';
+import { MEAL_MAX_ATTEMPTS } from './meals';
 export const nowIso = () => new Date().toISOString();
 export async function enqueue(env:Env,id:string,kind:string,payload:unknown) {
  await env.DB.prepare('INSERT OR IGNORE INTO jobs(id,kind,payload,created_at,available_at) VALUES(?,?,?,?,?)').bind(id,kind,JSON.stringify(payload),nowIso(),nowIso()).run();
@@ -8,10 +9,12 @@ export async function dispatch(env:Env) {
  for (const row of rows.results) await env.JOBS.send({id:row.id});
 }
 export async function claim(env:Env,id:string):Promise<Job|null> {
- return env.DB.prepare("UPDATE jobs SET state='running',attempts=attempts+1,lease_until=? WHERE id=? AND state IN ('pending','retry') AND available_at<=? AND attempts<3 RETURNING *").bind(new Date(Date.now()+20*60_000).toISOString(),id,nowIso()).first<Job>();
+ return env.DB.prepare("UPDATE jobs SET state='running',attempts=attempts+1,lease_until=? WHERE id=? AND state IN ('pending','retry') AND available_at<=? AND attempts<CASE WHEN kind='meal-extract' THEN ? ELSE 3 END RETURNING *").bind(new Date(Date.now()+20*60_000).toISOString(),id,nowIso(),MEAL_MAX_ATTEMPTS).first<Job>();
 }
 export async function retryJob(env:Env,job:Job,error:string,delay=60) {
- await env.DB.prepare('UPDATE jobs SET state=?,error=?,available_at=?,lease_until=NULL WHERE id=? AND state=\'running\'').bind(job.attempts>=3?'failed':'retry',error,new Date(Date.now()+Math.min(86400,Math.max(1,delay))*1000).toISOString(),job.id).run();
+ // Queue delay is capped at 24h, but D1 preserves a longer server-mandated meal wait.
+ const wait=job.kind==='meal-extract'?Math.max(1,delay):Math.min(86400,Math.max(1,delay));
+ await env.DB.prepare('UPDATE jobs SET state=?,error=?,available_at=?,lease_until=NULL WHERE id=? AND state=\'running\'').bind(job.attempts>=(job.kind==='meal-extract'?MEAL_MAX_ATTEMPTS:3)?(job.kind==='meal-extract'?'needs_review':'failed'):'retry',error,new Date(Date.now()+wait*1000).toISOString(),job.id).run();
 }
 export async function recover(env:Env) {
  // A crashed delivery may already exist at Discord. Never replay a POST blindly.
@@ -52,12 +55,13 @@ export async function reserveLlm(env:Env,id:string,day:string):Promise<boolean> 
  if(env.LLM_ENABLED!=='true'||!env.OPENROUTER_API_KEY) return false;
  const cap=Number(env.LLM_DAILY_BUDGET_USD??'0.50'); const calls=Number(env.LLM_DAILY_CALLS??'2'); const per=Number(env.LLM_MAX_CALL_USD??'0.25');
  if(!Number.isFinite(cap)||!Number.isFinite(per)||!Number.isInteger(calls)||cap<=0||per<=0||calls<=0) return false;
- const existing=await env.DB.prepare('SELECT state,reserved_usd FROM llm_usage WHERE id=? AND day=?').bind(id,day).first<{state:string;reserved_usd:number}>();
+ // A delayed run keeps its original reservation, even if its retries cross KST midnight.
+ const existing=await env.DB.prepare('SELECT state,reserved_usd,day FROM llm_usage WHERE id=?').bind(id).first<{state:string;reserved_usd:number;day:string}>();
  if(existing?.state==='safe_retry' && existing.reserved_usd>=per) {
- const reused=await env.DB.prepare("UPDATE llm_usage SET state='reserved' WHERE id=? AND state='safe_retry' RETURNING id").bind(id).first();
+ const reused=await env.DB.prepare("UPDATE llm_usage SET state='reserved' WHERE id=? AND state='safe_retry' AND (SELECT COALESCE(SUM(MAX(reserved_usd,COALESCE(actual_usd,0))),0) FROM llm_usage WHERE day=? AND state!='confirmed_rejected')<=? RETURNING id").bind(id,existing.day,cap).first();
  return !!reused;
  }
  // Unknown/failed usage retains its reservation. SQL serializes concurrent reservations.
- const r=await env.DB.prepare("INSERT OR IGNORE INTO llm_usage(id,day,reserved_usd,state,created_at) SELECT ?,?,?,'reserved',? WHERE (SELECT COUNT(*) FROM llm_usage WHERE day=?)<? AND (SELECT COALESCE(SUM(MAX(reserved_usd,COALESCE(actual_usd,0))),0) FROM llm_usage WHERE day=?) + ? <= ?").bind(id,day,per,nowIso(),day,calls,day,per,cap).run();
+ const r=await env.DB.prepare("INSERT OR IGNORE INTO llm_usage(id,day,reserved_usd,state,created_at) SELECT ?,?,?,'reserved',? WHERE (SELECT COUNT(*) FROM llm_usage WHERE day=? AND state!='confirmed_rejected')<? AND (SELECT COALESCE(SUM(MAX(reserved_usd,COALESCE(actual_usd,0))),0) FROM llm_usage WHERE day=? AND state!='confirmed_rejected') + ? <= ?").bind(id,day,per,nowIso(),day,calls,day,per,cap).run();
  return r.meta.changes===1;
 }
