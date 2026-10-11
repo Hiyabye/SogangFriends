@@ -85,8 +85,17 @@ export async function completeInteraction(env:Env,job:Job) {
  if(!allowedGuild(i.guild_id,env)) return;
  let content:DiscordMessageInput;
  try{content=await commandContent(env,i);}catch{content='처리하지 못했습니다. 관리자는 /status에서 상태를 확인하세요.';}
- // Idempotent edit rather than a second public POST; never expose REST response bodies.
- const response=await fetch(`https://discord.com/api/v10/webhooks/${i.application_id}/${i.token}/messages/@original`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(message(content)),signal:AbortSignal.timeout(10_000)});
+ if(Date.now()>expires){
+ await env.DB.prepare("UPDATE jobs SET state='needs_review',lease_until=NULL,error='interaction expired before reply' WHERE id=?").bind(job.id).run();return;
+ }
+ let body:BodyInit=JSON.stringify(message(content)),headers:HeadersInit|undefined={'Content-Type':'application/json'};
+ if(typeof content!=='string'&&content.file){
+ const form=new FormData();form.append('payload_json',body);
+ form.append('files[0]',new Blob([Uint8Array.from(content.file.bytes).buffer],{type:content.file.mime}),content.file.filename);
+ body=form;headers=undefined;
+ }
+ // PATCH replaces the explicit attachment set on retries; never log files, tokens or REST bodies.
+ const response=await fetch(`https://discord.com/api/v10/webhooks/${i.application_id}/${i.token}/messages/@original`,{method:'PATCH',headers,body,signal:AbortSignal.timeout(10_000)});
  if(!response.ok) throw new Error('interaction reply failed');
 }
 export default {

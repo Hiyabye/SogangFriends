@@ -53,6 +53,11 @@ describe('Discord message safety', () => {
     expect(data.allowed_mentions).toEqual({ parse: [] });expect(data).not.toHaveProperty('flags');
     expect(message('plain text')).toEqual({ content: 'plain text', allowed_mentions: { parse: [] } });
   });
+  it('serializes attachment metadata without putting image bytes in JSON', () => {
+    const data=message({content:'공식 메뉴표',file:{filename:'menu.png',bytes:new Uint8Array([1,2,3]),mime:'image/png'}});
+    expect(data.attachments).toEqual([{id:0,filename:'menu.png'}]);expect(data.allowed_mentions.parse).toEqual([]);
+    expect(data).not.toHaveProperty('file');expect(JSON.stringify(data)).not.toContain('bytes');
+  });
   it('packs bounded notices and retains every source link', () => {
     const notices = Array.from({ length: 10 }, (_, i) => ({ id: String(i), source: '학사', title: '@everyone ' + '가'.repeat(1500), published: '2026-10-09', url: `https://www.sogang.ac.kr/notice/${i}` }));
     const batches = batchNotices(notices);

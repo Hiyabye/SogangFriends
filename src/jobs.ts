@@ -31,7 +31,11 @@ export async function mealCommandResponse(env:Env,date:string):Promise<DiscordMe
  if(cached&&usable)return formatMeal(cached.week,date,cached.sourceUrl);
  const source=await mealImageSource(env,date);
  if(!source)return cached?formatMeal(cached.week,date,cached.sourceUrl):unavailableMeal(env,date);
- return {content:`${date} 식단 텍스트를 확인하지 못해 공식 주간 메뉴표를 안내합니다.\n원문: <${source.url}>`,embeds:[{title:`벨라르미노 주간 메뉴 (${source.start} ~ ${source.end})`,url:source.url,image:{url:source.imageUrl}}]};
+ let image:Awaited<ReturnType<typeof fetchImage>>;
+ try{image=await fetchImage(source.imageUrl);}catch{return `${date} 공식 메뉴표 이미지 파일을 불러오지 못했습니다.\n원문: <${source.url}>`;}
+ const window=mealWindow();
+ if(source.start<window.start||source.end>window.end)return unavailableMeal(env,date);
+ return {content:`${date} 식단 텍스트를 확인하지 못해 공식 주간 메뉴표를 이미지 파일로 첨부합니다 (${source.start} ~ ${source.end}).\n원문: <${source.url}>`,file:{filename:`bellarmino-${source.start}-${source.end}.${image.mime==='image/png'?'png':'jpg'}`,bytes:image.bytes,mime:image.mime}};
 }
 export async function planCron(env:Env,scheduledTime:number) {
  await pruneMealContent(env);

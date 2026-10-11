@@ -123,7 +123,7 @@ describe('interaction and durable integration',()=>{
  expect(body.content).toContain('조식 한식: 확인 불가 / 미기재');expect(body.content).toContain(`원문: <${source}>`);
  expect(body.allowed_mentions.parse).toEqual([]);expect(extraction).not.toHaveBeenCalled();
  }finally{db.close();vi.useRealTimers();}});
- it.each(['missing','unknown'])('edits the deferred meal command with the matching official image when extraction is %s',async(cache)=>{
+ it.each([['missing','image/png'],['unknown','image/png'],['missing','image/jpeg']])('uploads the matching official image file when extraction is %s (%s)',async(cache,mime)=>{
  const db=testDatabase();try{
  vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(new Date('2026-10-13T15:30:00Z'));
  const source='https://scc.sogang.ac.kr/front/cmsboardview.do?bbsConfigFK=1185&siteId=dormitory&pkid=941660';
@@ -135,16 +135,20 @@ describe('interaction and durable integration',()=>{
   db.sqlite.prepare('INSERT INTO meals(cache_key,source_url,image_hash,version,start_date,end_date,data,extracted_at,verified_at,model) VALUES(?,?,?,?,?,?,?,?,?,?)').run('unknown-week',source,'hash','version',week.start,week.end,JSON.stringify(week),new Date().toISOString(),new Date().toISOString(),'fixture/model:free');
  }
  db.env.LLM_ENABLED='false';
+ const download=vi.mocked((await import('../src/sources')).fetchImage);download.mockClear();download.mockResolvedValueOnce({bytes:new Uint8Array([1,2,3]),mime,hash:'fixture'});
  const extraction=vi.mocked((await import('../src/meals')).extractMeal);extraction.mockClear();
  const fetchMock=vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response('{}'));
  expect(await (await handleRequest(await signed(db.env,interaction('meal','111','0')),db.env)).json()).toEqual({type:5,data:{}});
  const job=db.sqlite.prepare("SELECT * FROM jobs WHERE id='interaction:123'").get()!;
  await completeInteraction(db.env,job as any);
  expect(fetchMock).toHaveBeenCalledTimes(1);expect(fetchMock.mock.calls[0][1]!.method).toBe('PATCH');
- const body=JSON.parse(fetchMock.mock.calls[0][1]!.body as string);
- expect(body.content).toContain('2026-10-14');expect(body.embeds).toHaveLength(1);
- expect(body.embeds[0]).toMatchObject({url:source,image:{url:image}});expect(body.allowed_mentions.parse).toEqual([]);
- expect(body).not.toHaveProperty('flags');expect(extraction).not.toHaveBeenCalled();
+ const request=fetchMock.mock.calls[0][1]!,form=request.body as FormData;
+ expect(form).toBeInstanceOf(FormData);expect(request.headers).toBeUndefined();
+ const body=JSON.parse(form.get('payload_json') as string),file=form.get('files[0]') as File;
+ const filename=`bellarmino-2026-10-12-2026-10-18.${mime==='image/png'?'png':'jpg'}`;
+ expect(body.content).toContain('2026-10-14');expect(body.content).toContain(`원문: <${source}>`);expect(body.attachments).toEqual([{id:0,filename}]);expect(body).not.toHaveProperty('embeds');expect(body.allowed_mentions.parse).toEqual([]);
+ expect(file.name).toBe(filename);expect(file.type).toBe(mime);expect([...new Uint8Array(await file.arrayBuffer())]).toEqual([1,2,3]);expect(download).toHaveBeenCalledWith(image);
+ expect(body).not.toHaveProperty('flags');expect(extraction).not.toHaveBeenCalled();expect(db.sqlite.prepare('SELECT COUNT(*) n FROM llm_usage').get()!.n).toBe(0);
  }finally{db.close();vi.useRealTimers();}});
  it.each(['2026-02-30','not-a-date','2026-10-1'])('rejects invalid meal date %s without inference or a database lookup',async(date)=>{
  const db=testDatabase();try{

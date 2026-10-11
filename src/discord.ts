@@ -69,10 +69,13 @@ function truncate(content: string, limit: number): string {
 }
 
 export interface DiscordImageEmbed { title: string; url: string; image: { url: string } }
-export type DiscordMessageInput = string | { content: string; embeds: DiscordImageEmbed[] };
-export function message(input: DiscordMessageInput): { content: string; allowed_mentions: { parse: never[] }; embeds?: DiscordImageEmbed[] } {
+export interface DiscordImageFile { filename: string; bytes: Uint8Array; mime: string }
+export type DiscordMessageInput = string | { content: string; embeds?: DiscordImageEmbed[]; file?: DiscordImageFile };
+export function message(input: DiscordMessageInput): { content: string; allowed_mentions: { parse: never[] }; embeds?: DiscordImageEmbed[]; attachments?: {id:number;filename:string}[] } {
   const content = typeof input === 'string' ? input : input.content;
-  return { content: truncate(content, 2000), allowed_mentions: { parse: [] }, ...(typeof input === 'string' ? {} : { embeds: input.embeds }) };
+  return { content: truncate(content, 2000), allowed_mentions: { parse: [] },
+    ...(typeof input !== 'string' && input.embeds ? { embeds: input.embeds } : {}),
+    ...(typeof input !== 'string' && input.file ? { attachments: [{id:0,filename:input.file.filename}] } : {}) };
 }
 
 function display(text: string): string {
