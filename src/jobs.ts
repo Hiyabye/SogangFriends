@@ -3,7 +3,8 @@ import { SOURCES, collectNotices, discoverMealSources, fetchImage } from './sour
 import { extractMeal, formatMeal, MealExtractionError, MEAL_ATTEMPTS_PER_MODEL, MEAL_MAX_ATTEMPTS, MEAL_PRIMARY_MODEL, MEAL_FALLBACK_MODEL, mealRetryDelay } from './meals';
 import { batchNotices, discordSend, allowedGuild, type DiscordMessageInput } from './discord';
 import { todayKst, validDate } from './time';
-import { dueReminders, validateSchedules } from './schedule';
+import { validateSchedules } from './schedule';
+import { updateScheduleSummary } from './schedule-summary';
 import { claim, deliveryIntent, dispatch, enqueue, nowIso, recover, reserveLlm, retryJob, saveNotices, sourceFailure } from './storage';
 import {cacheMealSources,mealImageSource,mealWindow,pruneMealContent} from './meal-cache';
 export async function getSchedules(env:Env):Promise<Schedule[]> {
@@ -155,16 +156,12 @@ export async function executeJob(env:Env,job:Job) {
  }
  case 'schedule-daily': {
  if(payload.date!==todayKst()) break;
- for(const {item,offset,kind,date} of dueReminders(await getSchedules(env),payload.date)) {
- const label=offset===0?'당일':`D-${offset}`;
- const phase=kind==='start'?'시작':item.type!=='deadline'&&item.startDate===date?'시작·마감':'마감';
- const when=kind==='deadline'?(item.deadlineAt??date):item.endDate?`${date} ~ ${item.endDate}`:date;
- const caution=kind==='deadline'?(item.deadlineAt?'':' (날짜만 공지됨; 마감 시각 확인 필요)'):' (날짜 기준; 세부 운영 시각은 원문 확인)';
- const text=`[학사 일정 ${phase} ${label}] ${item.title}\n${when}${caution}${item.note?`\n${item.note}`:''}\n${item.sourceUrl}`;
- // Preserve existing deadline keys; start reminders have a separate identity.
- const suffix=kind==='deadline'?String(offset):`start:${offset}`;
- for(const g of await recipients(env,'schedule_channel')) await deliveryIntent(env,`schedule:${g.id}:${item.id}:${suffix}`,g.id,g.channel,text,new Date(`${payload.date}T15:00:00Z`).toISOString());
+ for(const g of await recipients(env,'schedule_channel')) await enqueue(env,`schedule-summary:${g.id}:${g.channel}:${payload.date}`,'schedule-summary',{guild:g.id,channel:g.channel,date:payload.date});
+ break;
  }
+ case 'schedule-summary': {
+ if(payload.date!==todayKst())break;
+ await updateScheduleSummary(env,payload.guild,payload.channel,payload.date,await getSchedules(env));
  break;
  }
  case 'deliver': {

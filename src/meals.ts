@@ -155,9 +155,10 @@ export function formatMeal(week:MealWeek,date:string,sourceUrl:string):string {
  const day=validDate(date)&&week.certain&&date>=week.start&&date<=week.end?week.days.find(d=>d.date===date):undefined;
  if(!day)return `${validDate(date)?date:'지정 날짜'} 식단 확인 불가\n원문: <${sourceUrl}>`;
  const heading=`${date} 벨라르미노 식단`,source=`원문: <${sourceUrl}>`;
+ const caution='AI 이미지 판독 결과로 메뉴명에 오탈자가 있을 수 있습니다. 미확인 항목과 정확한 메뉴는 원문을 확인하세요.';
  const entries:[string,Offering][]=[['조식 한식',day.breakfastKorean],['조식 양식·일품',day.breakfastWestern],['석식',day.dinner]];
  if(day.cupRice.status==='available')entries.push(['컵밥',day.cupRice]);
- const budget=Math.floor((2000-heading.length-source.length-entries.length-1)/entries.length);
+ const budget=Math.floor((2000-heading.length-source.length-caution.length-entries.length-2)/entries.length);
  if(budget<160)throw new Error('Meal source URL too long');
- return [heading,...entries.map(([label,o])=>display(label,o,budget)),source].join('\n');
+ return [heading,...entries.map(([label,o])=>display(label,o,budget)),caution,source].join('\n');
 }

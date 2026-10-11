@@ -8,6 +8,7 @@ import { enqueue, nowIso } from './storage';
 import {handleNoticeIngest} from './notice-ingest';
 import {handleNoticeArchive} from './notice-archive';
 import {handleMealCompare} from './meal-compare';
+import {operationalStatus} from './status';
 interface Interaction {id:string;application_id:string;token:string;type:number;guild_id?:string;member?:{permissions?:string};data?:{name:string;options?:{name:string;value:string}[]}}
 function reply(content:string,ephemeral=true) {return Response.json({type:4,data:{...message(content),...(ephemeral?{flags:64}:{})}});}
 export async function handleRequest(request:Request,env:Env):Promise<Response> {
@@ -68,13 +69,7 @@ async function commandContent(env:Env,i:Interaction):Promise<DiscordMessageInput
  }
  case 'status': {
  if(!authorized(i,env)) return '서버 관리 권한이 필요합니다.';
- const guild=await env.DB.prepare('SELECT notices_channel,meals_channel,schedule_channel FROM guilds WHERE id=?').bind(i.guild_id!).first();
- const sources=await env.DB.prepare('SELECT id,last_success,last_attempt,error FROM sources').all();
- const health=await env.DB.prepare('SELECT id,last_attempt,last_success,error FROM health').all();
- const jobs=await env.DB.prepare('SELECT state,COUNT(*) count FROM jobs WHERE kind!=\'interaction\' GROUP BY state').all();
- const deliveries=await env.DB.prepare('SELECT state,COUNT(*) count FROM deliveries WHERE guild_id=? GROUP BY state').bind(i.guild_id!).all();
- const usage=await env.DB.prepare("SELECT COUNT(*) runs,SUM(reserved_usd) reserved,SUM(actual_usd) actual FROM llm_usage WHERE day=? AND state!='confirmed_rejected'").bind(todayKst()).first();
- return `서버 설정: ${JSON.stringify(guild)}\n수집: ${JSON.stringify(sources.results)}\n식단·Cron: ${JSON.stringify(health.results)}\n공유 작업: ${JSON.stringify(jobs.results)}\n이 서버 발송: ${JSON.stringify(deliveries.results)}\nLLM 오늘: ${JSON.stringify(usage)} (reserved=보수적 예약액, actual=응답 비용; 청구서 아님)\nneeds_review/uncertain은 자동 재발송하지 않습니다.`;
+ return operationalStatus(env,i.guild_id!);
  }
  default: return '지원하지 않는 명령입니다.';
  }

@@ -16,7 +16,12 @@ describe('strict observed meal validation',()=>{
  it('shows cup rice on ANY day only with date-specific evidence, checks explicit time',()=>{const x=sample();x.days[0].cupRice={status:'available',items:['컵밥'],time:'11:40' as never,evidence:'10/12 컵밥 11:40'};const w=validateMeal(x,expected);expect(formatMeal(w,'2026-10-12','https://school.example')).toContain('컵밥: 컵밥 (11:40)');expect(formatMeal(w,'2026-10-13','https://school.example')).not.toContain('컵밥:');x.days[0].cupRice.evidence='컵밥';expect(()=>validateMeal(x,expected)).toThrow();});
  it('accepts imperfect menu spelling without weakening date or offering validation',()=>{
   const x=sample();x.days[0].breakfastKorean={status:'available',items:['메뉴 오타'],time:null,evidence:'10/12 메뉴'};
-  expect(validateMeal(x,expected).days[0].breakfastKorean.items).toEqual(['메뉴 오타']);
+  const week=validateMeal(x,expected);
+  expect(week.days[0].breakfastKorean.items).toEqual(['메뉴 오타']);
+  const text=formatMeal(week,expected.start,'https://school.example');
+  expect(text).toContain('조식 한식: 메뉴 오타');expect(text).toContain('AI 이미지 판독 결과');
+  expect(text).toContain('석식: 확인 불가 / 미기재');
+  week.days[0].weekday=2;expect(()=>validateMeal(week,expected)).toThrow('Invalid observed date or weekday');
  });
  it('rejects invalid enum/types and available menu without evidence',()=>{const x=sample() as any;x.days[0].dinner.status='false';expect(()=>validateMeal(x,expected)).toThrow();x.days[0].dinner={status:'available',items:['Rice'],time:null,evidence:''};expect(()=>validateMeal(x,expected)).toThrow();});
  it('does not show expired cached meal as current',()=>{const w=validateMeal(sample(),expected);expect(formatMeal(w,'2026-10-19','https://school.example')).toBe('2026-10-19 식단 확인 불가\n원문: <https://school.example>');});
