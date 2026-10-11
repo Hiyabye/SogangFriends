@@ -4,7 +4,7 @@
 
 `job_reviews` adds review annotations without rewriting `jobs.state`, attempts, errors, source baselines, rejected extraction provenance, or any `llm_usage` reservation. `closed` means the historical attempt was reviewed and will not be resumed; **it does not mean the operation succeeded or a provider problem was fixed**. `deferred` means manual investigation is still required. Matching execution state and attempt count are required for the annotation to apply in `/status`.
 
-The following is a **proposal based on a read-only production query**, not an applied production change. Migration 0007, review inserts, deployment, and any fresh inference each require their appropriate approval. Review inserts must be guarded against the inspected state and attempt count. Never reset attempts or make an uncertain inference retryable to clear a dashboard.
+The following review set was approved and applied on2026-10-11, after the initial read-only inspection. Both migrations0006/0007 and Worker deployment were separately approved. Exact-ID inserts were guarded against the inspected state and attempt count across the complete12-row set. Read-only comparisons confirmed every historical job state/attempt/error and every usage row unchanged,11 closed/1 deferred, and no schedule message created during verification. Fresh inference was not invoked. Never reset attempts or make an uncertain inference retryable to clear a dashboard.
 
 ## Shared failures and needs_review (12 rows)
 
