@@ -126,6 +126,8 @@ Cron은 15분마다 실행. `/status`의 `식단·Cron`에서 `id=cron`의 `last
 - 모델에는 inline image·JSON schema·추출 지시만 제공하고 임의 URL/Discord 관리 도구를 주지 않습니다.
 - 활성화 직후에는 일회성 발견 작업으로 추출·저장을 확인할 수 있습니다. 이 작업 자체는 Discord에 즉시 게시하지 않습니다. JSON mode/schema와 evidence는 정확성을 증명하지 않으며, 실제 원본 대조가 필요합니다.
 
+식단 호스팅 비교는 수동 전용 `.github/workflows/meal-compare.yml`로 실행할 수 있습니다. 운영자가 기존 일일 한도 내 D1 예약·만료 티켓을 먼저 만든 뒤, Actions가 HMAC 인증 `/internal/meal-compare`에서 한 번만 claim하고 같은 이미지 해시·추출 코드·Dots 설정으로 최대 두 번 시도합니다. 불확실한 추론은 즉시 멈추고 예약을 보존합니다. 결과는 3일짜리 진단 artifact로만 남으며 serving cache·Discord에 쓰지 않습니다. `OPENROUTER_API_KEY`와 기존 `NOTICE_INGEST_SECRET` Actions secrets가 필요합니다. 재실행은 금지되며 새 티켓 없이 모델을 호출할 수 없습니다. 비교만으로 영구 이전이나 공지 이력 보관 정책 변경이 이루어지지는 않습니다.
+
 현재 수동 수정/승인 UI와 arbitrary menu override는 제공하지 않습니다. 2026-10-11 reasoning을 끈 Dots 검증은 JSON 생성에는 성공했지만 원문 대조에서 메뉴 오독·빈 셀 내용 생성이 확인돼 사용하지 않았습니다. 운영자 전용 `meal-quarantine` Queue 작업은 해당 결과를 추출 작업 payload에 보존한 뒤 serving cache에서만 원자적으로 제거합니다. 자동 사실 검증 기능은 아니므로 JSON 통과만으로 메뉴 정확성을 보장하지 않습니다. 검토 데이터 자동 적용은 다음 버전에서 post URL/hash/기간에 묶인 형식으로 추가합니다.
 
 ## 5. 학사 일정 검토·초기화

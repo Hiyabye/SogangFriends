@@ -6,4 +6,5 @@ node_modules/
 !.env.example
 coverage/
 dist/
+meal-comparison-result/
 .playwright-cli/

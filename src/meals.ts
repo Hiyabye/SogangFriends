@@ -14,8 +14,11 @@ export function mealRetryDelay(attempt:number,retryAfter=0):number {
 }
 /** Confirmed rejections and completely received invalid outputs can retry; uncertain inference cannot. */
 export class MealExtractionError extends Error {
- constructor(message:string, public actualCost:number|null = null, public safeRetry = false, public retryAfter?:number) {
-  super(message); this.name='MealExtractionError';
+ actualCost:number|null;
+ safeRetry:boolean;
+ retryAfter?:number;
+ constructor(message:string,actualCost:number|null=null,safeRetry=false,retryAfter?:number) {
+  super(message);this.name='MealExtractionError';this.actualCost=actualCost;this.safeRetry=safeRetry;this.retryAfter=retryAfter;
  }
 }
 function validDate(value:unknown):value is string {return typeof value==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(value)&&Number.isFinite(Date.parse(value))&&new Date(value+'T00:00:00Z').toISOString().slice(0,10)===value;}
