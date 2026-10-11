@@ -117,4 +117,23 @@ The user approved quarantining this exact derived result. Worker `2c5964ae-4788-
 
 Remote verification confirmed quarantine done, extraction audit preserved, original attempt count2 retained, and serving-meal count0. `/meal` therefore returns its official source fallback rather than this inaccurate menu. No Discord test post or paid inference was made. The older uncertain NVIDIA reservation remains preserved. This operator cleanup is not an automatic factual-quality gate for future extractions.
 
-TypeScript and214 tests passed; previous audit reported zero vulnerabilities, and final diff check passed. These source changes are locally committed/deployed; no new GitHub push or CI is claimed.
+TypeScript and214 tests passed; previous audit reported zero vulnerabilities, and final diff check passed. These source changes were locally committed/deployed at that point; later publication and CI are recorded below.
+
+## Controlled GitHub Actions comparison — 2026-10-11 KST
+
+The user approved publishing the pending commits and a manual-only comparison, configured OPENROUTER_API_KEY in repository Actions secrets, and separately approved the restricted HMAC claim/report endpoint. Implementation `b3530e3` was deployed as Worker `7414a7be-6597-4a9b-be39-75d180098211` and published. The endpoint accepts only operator-preallocated normal-cap tickets: one successful claim authorizes the runner; exact outcome-report retries are idempotent. It does not allocate new reservations, invoke models, create meals, or deliver Discord messages. It respects the inference pause for new claims while allowing reports after pause/expiry. No Cloudflare write credential is added to Actions.
+
+[Actions run38112076601](https://github.com/Hiyabye/SogangFriends/actions/runs/38112076601) used the identical original image hash `05c38bb91374f5d910ac108daee6f94bd7564424761f55a19f06f9ca2ca0104c`, shared extraction implementation, Dots free model, reasoning disabled,6000-token limit,120-second timeout, temperature0 and catalog-selected strict output when supported. One second normal-cap reservation covered at most two safe attempts, with no extra-run allowance. Node's strip-only compatibility check exposed TypeScript constructor parameter properties; they were replaced with equivalent explicit fields before the live run.
+
+Both Actions attempts returned complete responses and were rejected as `Uncertain or conflicting meal period`:
+
+| Attempt | Shared extraction elapsed | Completion tokens | Reasoning tokens | Finish |
+| --- | --- | --- | --- | --- |
+|1|46.217 seconds|4524|0|stop|
+|2|13.755 seconds|1129|0|stop|
+
+No schema-valid week was produced, so no menu could pass factual comparison. The workflow's successful exit means the diagnostic and report completed, **not that extraction succeeded**. The report records safe_retry and observed cost0; its$0.25 conservative reservation remains recorded. The earlier uncertain NVIDIA reservation remains reserved. Remote D1 confirms comparison_done with2 attempts and serving-meal count0. No comparison output was inserted into meals and no comparison Discord post was made. Diagnostic JSON is retained as an artifact for3 days, not as a long-term meal archive; notice-history policy/data were not changed by this task.
+
+**Conclusion:** this small, non-simultaneous Dots comparison does not demonstrate that GitHub Actions is better than Workers. Both runtimes obtained complete model responses; Workers' schema-valid sample failed factual review, while Actions' samples failed date/uncertainty validation. Model/provider variation and the time gap prevent attributing differences solely to hosting. Keep production hosting unchanged; investigate model/image extraction quality before permanent migration. The earlier Gemma429 problem and NVIDIA transport uncertainty are not resolved by this Dots-only test.
+
+Local TypeScript and235 tests passed, npm audit reported zero vulnerabilities, Node imported the actual comparison entrypoint without network calls, and diff checks passed. [GitHub CI38111983225](https://github.com/Hiyabye/SogangFriends/actions/runs/38111983225) passed. Actions reported upstream Node20-action deprecation and an upcoming ubuntu-latest image migration; these warnings did not fail the run and were left unchanged as unrelated maintenance.
