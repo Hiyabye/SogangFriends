@@ -75,6 +75,16 @@ describe('private meal quarantine',()=>{
 });
 
 describe('durable five-plus-five meal policy',()=>{
+ it('does not infer expired weeks or release their unknown reservations',async()=>{
+  vi.setSystemTime(new Date('2026-10-12T00:00:00Z'));
+  db.sqlite.prepare("INSERT INTO llm_usage(id,day,reserved_usd,state,created_at) VALUES('meal','2026-10-11',.25,'reserved',?)").run(new Date().toISOString());
+  await run();expect(extractMeal).not.toHaveBeenCalled();expect(row().state).toBe('needs_review');expect(usage().state).toBe('reserved');
+ });
+ it('accounts for a complete response crossing Monday without retaining the expired menu',async()=>{
+  vi.setSystemTime(new Date('2026-10-11T14:59:30Z'));
+  vi.mocked(extractMeal).mockImplementationOnce(async()=>{vi.advanceTimersByTime(120000);return {week,actualCost:0,model:MEAL_PRIMARY_MODEL};});
+  await run();expect(extractMeal).toHaveBeenCalledTimes(1);expect(usage().state).toBe('completed');expect(row().state).toBe('needs_review');expect(db.sqlite.prepare('SELECT COUNT(*) n FROM meals').get()!.n).toBe(0);
+ });
  it('passes reasoning disable only for an explicitly flagged operator job',async()=>{
   vi.mocked(extractMeal).mockRejectedValue(new MealExtractionError('Rejected',null,true));
   await run();expect(vi.mocked(extractMeal).mock.lastCall![3]).not.toHaveProperty('disableReasoning');
@@ -165,6 +175,8 @@ describe('durable five-plus-five meal policy',()=>{
   expect(Date.parse(String(row().available_at))-Date.now()).toBe(1200000);
  });
  it('honors Retry-After beyond Queue’s 24-hour delay without spending an early attempt',async()=>{
+  // Use next week's source so the delay crosses midnight without expiring the menu.
+  db.sqlite.prepare("UPDATE jobs SET payload=? WHERE id='meal'").run(JSON.stringify({...payload,start:'2026-10-12',end:'2026-10-18'}));
   vi.mocked(extractMeal).mockRejectedValue(new MealExtractionError('Rejected',null,true,100000));
   await run();expect(Date.parse(String(row().available_at))-Date.now()).toBe(100000000);
   expect(db.env.JOBS.send).toHaveBeenLastCalledWith({id:'meal'},{delaySeconds:86400});

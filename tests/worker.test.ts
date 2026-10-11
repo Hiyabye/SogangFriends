@@ -33,7 +33,7 @@ describe('interaction and durable integration',()=>{
  });
  it('discovers meals while disabled without blocking a later enabled extraction',async()=>{
   const db=testDatabase();try {
-   vi.spyOn(await import('../src/sources'),'discoverMeal').mockResolvedValue({url:'https://scc.sogang.ac.kr/front/cmsboardview.do?pkid=123',imageUrl:'https://scc.sogang.ac.kr/dataview/board/1185/synthetic.jpg',published:'2026-10-08',start:'2026-10-12',end:'2026-10-18'});
+   vi.spyOn(await import('../src/sources'),'discoverMealSources').mockResolvedValue([{url:'https://scc.sogang.ac.kr/front/cmsboardview.do?bbsConfigFK=1185&siteId=dormitory&pkid=123',imageUrl:'https://scc.sogang.ac.kr/dataview/board/1185/synthetic.jpg',published:'2026-10-08',start:'2026-10-12',end:'2026-10-18'}]);
    await enqueue(db.env,'discovery-disabled','meal-discover',{});
    await consume(db.env,{messages:[{body:{id:'discovery-disabled'},ack:vi.fn()}]} as any);
    expect(db.sqlite.prepare("SELECT COUNT(*) AS n FROM jobs WHERE kind='meal-extract'").get()!.n).toBe(0);
@@ -43,6 +43,18 @@ describe('interaction and durable integration',()=>{
    await consume(db.env,{messages:[{body:{id:'discovery-enabled'},ack:vi.fn()}]} as any);
    expect(db.sqlite.prepare("SELECT state FROM jobs WHERE kind='meal-extract'").get()!.state).toBe('pending');
   } finally {db.close();}
+ });
+ it('captures image metadata without image download or inference in a source-only verification',async()=>{
+  const db=testDatabase();try{
+   db.env.LLM_ENABLED='true';db.env.OPENROUTER_API_KEY='fixture';
+   const sources=await import('../src/sources');vi.mocked(sources.fetchImage).mockClear();
+   vi.spyOn(sources,'discoverMealSources').mockResolvedValue([{url:'https://scc.sogang.ac.kr/front/cmsboardview.do?bbsConfigFK=1185&siteId=dormitory&pkid=123',imageUrl:'https://scc.sogang.ac.kr/dataview/board/1185/synthetic.jpg',published:'2026-10-08',start:'2026-10-12',end:'2026-10-18'}]);
+   await enqueue(db.env,'source-only','meal-discover',{sourceOnly:true});
+   await consume(db.env,{messages:[{body:{id:'source-only'},ack:vi.fn()}]} as any);
+   expect(db.sqlite.prepare('SELECT COUNT(*) n FROM meal_sources').get()!.n).toBe(1);
+   expect(db.sqlite.prepare("SELECT COUNT(*) n FROM jobs WHERE kind='meal-extract'").get()!.n).toBe(0);
+   expect(sources.fetchImage).not.toHaveBeenCalled();expect(db.sqlite.prepare('SELECT COUNT(*) n FROM llm_usage').get()!.n).toBe(0);
+  }finally{db.close();}
  });
  it('retains public source failure details without logging interaction or inference payloads',async()=>{
   const db=testDatabase();try {
@@ -111,13 +123,37 @@ describe('interaction and durable integration',()=>{
  expect(body.content).toContain('조식 한식: 확인 불가 / 미기재');expect(body.content).toContain(`원문: <${source}>`);
  expect(body.allowed_mentions.parse).toEqual([]);expect(extraction).not.toHaveBeenCalled();
  }finally{db.close();vi.useRealTimers();}});
+ it.each(['missing','unknown'])('edits the deferred meal command with the matching official image when extraction is %s',async(cache)=>{
+ const db=testDatabase();try{
+ vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(new Date('2026-10-13T15:30:00Z'));
+ const source='https://scc.sogang.ac.kr/front/cmsboardview.do?bbsConfigFK=1185&siteId=dormitory&pkid=941660';
+ const image='https://scc.sogang.ac.kr/dataview/board/1185/synthetic.jpg';
+ db.sqlite.prepare('INSERT INTO meal_sources(source_url,image_url,published,start_date,end_date,verified_at) VALUES(?,?,?,?,?,?)').run(source,image,'2026-10-08','2026-10-12','2026-10-18',new Date().toISOString());
+ if(cache==='unknown'){
+  const unknown=()=>({status:'unknown',items:[],time:null,evidence:''});
+  const week={start:'2026-10-12',end:'2026-10-18',certain:true,days:Array.from({length:7},(_,i)=>({date:addDays('2026-10-12',i),weekday:i+1,breakfastKorean:unknown(),breakfastWestern:unknown(),breakfastCommon:unknown(),cupRice:unknown(),dinner:unknown(),drinks:unknown()}))};
+  db.sqlite.prepare('INSERT INTO meals(cache_key,source_url,image_hash,version,start_date,end_date,data,extracted_at,verified_at,model) VALUES(?,?,?,?,?,?,?,?,?,?)').run('unknown-week',source,'hash','version',week.start,week.end,JSON.stringify(week),new Date().toISOString(),new Date().toISOString(),'fixture/model:free');
+ }
+ db.env.LLM_ENABLED='false';
+ const extraction=vi.mocked((await import('../src/meals')).extractMeal);extraction.mockClear();
+ const fetchMock=vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response('{}'));
+ expect(await (await handleRequest(await signed(db.env,interaction('meal','111','0')),db.env)).json()).toEqual({type:5,data:{}});
+ const job=db.sqlite.prepare("SELECT * FROM jobs WHERE id='interaction:123'").get()!;
+ await completeInteraction(db.env,job as any);
+ expect(fetchMock).toHaveBeenCalledTimes(1);expect(fetchMock.mock.calls[0][1]!.method).toBe('PATCH');
+ const body=JSON.parse(fetchMock.mock.calls[0][1]!.body as string);
+ expect(body.content).toContain('2026-10-14');expect(body.embeds).toHaveLength(1);
+ expect(body.embeds[0]).toMatchObject({url:source,image:{url:image}});expect(body.allowed_mentions.parse).toEqual([]);
+ expect(body).not.toHaveProperty('flags');expect(extraction).not.toHaveBeenCalled();
+ }finally{db.close();vi.useRealTimers();}});
  it.each(['2026-02-30','not-a-date','2026-10-1'])('rejects invalid meal date %s without inference or a database lookup',async(date)=>{
  const db=testDatabase();try{
  const extraction=vi.mocked((await import('../src/meals')).extractMeal);extraction.mockClear();
  const fetchMock=vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response('{}'));
  const prepared=vi.spyOn(db.env.DB,'prepare');
  await completeInteraction(db.env,{payload:JSON.stringify({interaction:{...interaction('meal'),data:{name:'meal',options:[{name:'date',value:date}]}},expires:Date.now()+5000})} as any);
- expect(JSON.parse(fetchMock.mock.calls[0][1]!.body as string).content).toContain('날짜를 YYYY-MM-DD 형식으로 입력하세요.');
+ const body=JSON.parse(fetchMock.mock.calls[0][1]!.body as string);
+ expect(body.content).toContain('날짜를 YYYY-MM-DD 형식으로 입력하세요.');expect(body).not.toHaveProperty('embeds');expect(body.allowed_mentions.parse).toEqual([]);
  expect(prepared).not.toHaveBeenCalled();expect(extraction).not.toHaveBeenCalled();expect(fetchMock).toHaveBeenCalledTimes(1);
  }finally{db.close();}});
  it('returns the discovered source when the default KST meal date is not cached, without inference',async()=>{
@@ -131,6 +167,17 @@ describe('interaction and durable integration',()=>{
  expect(JSON.parse(fetchMock.mock.calls[0][1]!.body as string).content).toBe(`식단 확인 불가 (2026-10-14)\n${source}`);
  expect(extraction).not.toHaveBeenCalled();expect(fetchMock).toHaveBeenCalledTimes(1);
  }finally{db.close();vi.useRealTimers();}});
+ it('does not serve an expired menu or embed its image before physical maintenance',async()=>{
+  const db=testDatabase();try{
+   vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(new Date('2026-10-13T15:30:00Z'));
+   const source='https://scc.sogang.ac.kr/front/cmsboardview.do?bbsConfigFK=1185&siteId=dormitory&pkid=941444',image='https://scc.sogang.ac.kr/dataview/board/1185/old.jpg';
+   db.sqlite.prepare('INSERT INTO meal_sources(source_url,image_url,published,start_date,end_date,verified_at) VALUES(?,?,?,?,?,?)').run(source,image,'2026-09-30','2026-10-05','2026-10-11','old');
+   db.sqlite.prepare('INSERT INTO meals(cache_key,source_url,image_hash,version,start_date,end_date,data,extracted_at,verified_at,model) VALUES(?,?,?,?,?,?,?,?,?,?)').run('old',source,'hash','v','2026-10-05','2026-10-11','{"sentinel":"old menu"}','old','old','fixture/model:free');
+   const fetchMock=vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response('{}'));
+   await completeInteraction(db.env,{payload:JSON.stringify({interaction:{...interaction('meal'),data:{name:'meal',options:[{name:'date',value:'2026-10-11'}]}},expires:Date.now()+5000})} as any);
+   const body=JSON.parse(fetchMock.mock.calls[0][1]!.body as string);expect(body.content).toContain('식단 확인 불가 (2026-10-11)');expect(body).not.toHaveProperty('embeds');expect(body.content).not.toContain('old menu');
+  }finally{db.close();vi.useRealTimers();}
+ });
  it('status counts one active run but retains both released historical reservations',async()=>{
  const db=testDatabase();try{
  const day=todayKst();const insert=db.sqlite.prepare('INSERT INTO llm_usage(id,day,reserved_usd,state,created_at) VALUES(?,?,?,?,?)');

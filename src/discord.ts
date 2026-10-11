@@ -68,8 +68,11 @@ function truncate(content: string, limit: number): string {
   return output + '…';
 }
 
-export function message(content: string): { content: string; allowed_mentions: { parse: never[] } } {
-  return { content: truncate(content, 2000), allowed_mentions: { parse: [] } };
+export interface DiscordImageEmbed { title: string; url: string; image: { url: string } }
+export type DiscordMessageInput = string | { content: string; embeds: DiscordImageEmbed[] };
+export function message(input: DiscordMessageInput): { content: string; allowed_mentions: { parse: never[] }; embeds?: DiscordImageEmbed[] } {
+  const content = typeof input === 'string' ? input : input.content;
+  return { content: truncate(content, 2000), allowed_mentions: { parse: [] }, ...(typeof input === 'string' ? {} : { embeds: input.embeds }) };
 }
 
 function display(text: string): string {

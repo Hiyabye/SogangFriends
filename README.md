@@ -128,6 +128,10 @@ Cron은 15분마다 실행. `/status`의 `식단·Cron`에서 `id=cron`의 `last
 
 식단 호스팅 비교는 수동 전용 `.github/workflows/meal-compare.yml`로 실행할 수 있습니다. 운영자가 기존 일일 한도 내 D1 예약·만료 티켓을 먼저 만든 뒤, Actions가 HMAC 인증 `/internal/meal-compare`에서 한 번만 claim하고 같은 이미지 해시·추출 코드·Dots 설정으로 최대 두 번 시도합니다. 불확실한 추론은 즉시 멈추고 예약을 보존합니다. 결과는 3일짜리 진단 artifact로만 남으며 serving cache·Discord에 쓰지 않습니다. `OPENROUTER_API_KEY`와 기존 `NOTICE_INGEST_SECRET` Actions secrets가 필요합니다. 재실행은 금지되며 새 티켓 없이 모델을 호출할 수 없습니다. 비교만으로 영구 이전이나 공지 이력 보관 정책 변경이 이루어지지는 않습니다.
 
+식단은 장기 이력이 아니라 현재·다음 KST 월요일–일요일 주간 캐시로 관리합니다. `0005_meal_sources.sql`의 원문 이미지 URL/기간은 LLM 결과와 별도로 보관하며 Cron/발견 작업이 범위 밖 메뉴·이미지 메타데이터·거절 결과 본문을 정리합니다. 작업 ID, 감사 메타데이터와 불확실한 사용 예약은 삭제하지 않으며 공지 누적 보관은 그대로입니다. `/meal`은 사용할 텍스트가 없으면 요청 날짜와 일치하는 공식 주간 이미지를 embed로 보여 줍니다(봇에 Embed Links 권한 필요). 맞는 이미지가 없거나 보관 범위 밖이면 링크만 안내합니다. 명령 실행으로 모델을 호출하지 않으며 정기 발송은 기존 텍스트/링크 방식입니다.
+
+JSON은 유지하되 `certain`은 관측 날짜·요일에만 적용합니다. 메뉴 오타는 허용하고 읽지 못한 셀은 `unknown`으로 표시합니다. 날짜 불일치, 빈 셀 메뉴 생성과 요일 이동은 허용하지 않습니다. 이 프롬프트 변경으로 이전 실패/불확실 작업을 자동 재실행하지 않습니다.
+
 현재 수동 수정/승인 UI와 arbitrary menu override는 제공하지 않습니다. 2026-10-11 reasoning을 끈 Dots 검증은 JSON 생성에는 성공했지만 원문 대조에서 메뉴 오독·빈 셀 내용 생성이 확인돼 사용하지 않았습니다. 운영자 전용 `meal-quarantine` Queue 작업은 해당 결과를 추출 작업 payload에 보존한 뒤 serving cache에서만 원자적으로 제거합니다. 자동 사실 검증 기능은 아니므로 JSON 통과만으로 메뉴 정확성을 보장하지 않습니다. 검토 데이터 자동 적용은 다음 버전에서 post URL/hash/기간에 묶인 형식으로 추가합니다.
 
 ## 5. 학사 일정 검토·초기화
@@ -199,7 +203,7 @@ npx wrangler d1 execute sogang-friends --remote --command="SELECT day,state,rese
 - 6시간마다 총6개 페이지 이내의 느린 backfill; 명시적 시작 후 재개 가능. 실제 저장 확인 전 cursor를 이동하지 않습니다. 직접 상세 HTTP404/410은 삭제 표시로 넘기고, 5xx·알 수 없는 형식은 재시도 대상으로 남깁니다.
 - 완료 후에는 최근 범위만 확인합니다. 공식 사이트에서 이미 삭제된 글은 복구하지 않습니다. 움직이는 페이지 순회이므로 특정 시점의 완벽한 snapshot은 보장하지 않습니다.
 
-기존 DB에 additive migration **0003·0004**와 Worker/Actions feature flags가 필요합니다. **원격 migration·배포·Actions 활성화·실제 backfill은 별도 운영 승인 전 실행하지 않습니다.** 새 저장소 서비스나 bucket은 만들지 않습니다. 기존 R2-only 인덱스가 있는 다른 환경은 별도 원문 import 없이 D1 보관 완료로 간주하지 않습니다. 기존 식단의 이미지 해시/처리 버전 캐시는 그대로 두며 동일 날짜 수정 식단을 위한 별도 revision 구조는 추가하지 않습니다.
+기존 DB에 additive migration **0003·0004**와 Worker/Actions feature flags가 필요합니다. **원격 migration·배포·Actions 활성화·실제 backfill은 별도 운영 승인 전 실행하지 않습니다.** 새 저장소 서비스나 bucket은 만들지 않습니다. 기존 R2-only 인덱스가 있는 다른 환경은 별도 원문 import 없이 D1 보관 완료로 간주하지 않습니다. 식단의 이미지 해시/처리 버전 식별자는 유지하되 본문 캐시는 현재·다음 주로 제한합니다. 동일 날짜 수정 식단을 위한 별도 revision 구조는 추가하지 않습니다.
 
 ## 검증과 남은 제한
 
@@ -207,4 +211,4 @@ npx wrangler d1 execute sogang-friends --remote --command="SELECT day,state,rese
 
 운영 검증과 남은 한계는 [docs/VERIFICATION.md](docs/VERIFICATION.md)를 참고하세요. 2026-10-10 사용자 승인으로 D1 archive migration·운영 배포·최근 원문215개 저장과 6개 보드 첫 backfill 페이지를 확인했습니다. Git의 기본 archive flag는 비활성이며 운영 설정/Actions에서는 활성화했습니다. 전체 이력 완료·공지 LLM 처리와 실제 식단 OCR 성공은 아직 확인하지 못했습니다. dry-run은 배포가 아닙니다.
 
-다음 버전: staging 통합 테스트, 날짜별 식단 사람 승인/정확히 묶인 검토 override, decoded 이미지 pixel 제한, 안전한 관리자 reconciliation 도구, 장기 보관 정책, 분산 요청 pacing, 공지 원문 기반 실제 LLM 가공, 일정 정정 알림. 정확히 한 번 발송은 보장하지 않으며 Discord POST와 D1 기록은 비원자적입니다.
+다음 버전: staging 통합 테스트, 날짜별 식단 사람 승인/정확히 묶인 검토 override, decoded 이미지 pixel 제한, 안전한 관리자 reconciliation 도구, 공지 보관 용량/정책, 분산 요청 pacing, 공지 원문 기반 실제 LLM 가공, 일정 정정 알림. 정확히 한 번 발송은 보장하지 않으며 Discord POST와 D1 기록은 비원자적입니다.

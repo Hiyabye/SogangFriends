@@ -1,9 +1,9 @@
 import type { Env, Job } from './types';
-import { allowedGuild, authorized, batchNotices, message, validateChannel, verifyRequest } from './discord';
+import { allowedGuild, authorized, batchNotices, message, validateChannel, verifyRequest, type DiscordMessageInput } from './discord';
 import { SOURCES } from './sources';
 import { todayKst, validDate } from './time';
 import { upcomingSchedules } from './schedule';
-import { consume, getSchedules, mealResponse, planCron } from './jobs';
+import { consume, getSchedules, mealCommandResponse, planCron } from './jobs';
 import { enqueue, nowIso } from './storage';
 import {handleNoticeIngest} from './notice-ingest';
 import {handleNoticeArchive} from './notice-archive';
@@ -33,10 +33,10 @@ export async function handleRequest(request:Request,env:Env):Promise<Response> {
  return Response.json({type:5,data:admin?{flags:64}:{}});
  } catch {return reply('작업을 접수하지 못했습니다. 잠시 후 다시 시도하세요.');}
 }
-async function commandContent(env:Env,i:Interaction):Promise<string> {
+async function commandContent(env:Env,i:Interaction):Promise<DiscordMessageInput> {
  const options=Object.fromEntries((i.data!.options??[]).map(o=>[o.name,o.value]));
  switch(i.data!.name) {
- case 'meal': return mealResponse(env,options.date??todayKst());
+ case 'meal': return mealCommandResponse(env,options.date??todayKst());
  case 'notices': {
  const source=options.source;
  if(source&&!SOURCES.some(s=>s.id===source)) return '지원하지 않는 게시판입니다.';
@@ -83,7 +83,7 @@ export async function completeInteraction(env:Env,job:Job) {
  const {interaction:i,expires}=JSON.parse(job.payload) as {interaction:Interaction;expires:number};
  if(!i||Date.now()>expires) return;
  if(!allowedGuild(i.guild_id,env)) return;
- let content:string;
+ let content:DiscordMessageInput;
  try{content=await commandContent(env,i);}catch{content='처리하지 못했습니다. 관리자는 /status에서 상태를 확인하세요.';}
  // Idempotent edit rather than a second public POST; never expose REST response bodies.
  const response=await fetch(`https://discord.com/api/v10/webhooks/${i.application_id}/${i.token}/messages/@original`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(message(content)),signal:AbortSignal.timeout(10_000)});

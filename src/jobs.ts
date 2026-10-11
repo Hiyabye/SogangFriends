@@ -1,22 +1,40 @@
 import type { Env, Job, Notice, MealWeek, Schedule } from './types';
-import { SOURCES, collectNotices, discoverMeal, fetchImage } from './sources';
+import { SOURCES, collectNotices, discoverMealSources, fetchImage } from './sources';
 import { extractMeal, formatMeal, MealExtractionError, MEAL_ATTEMPTS_PER_MODEL, MEAL_MAX_ATTEMPTS, MEAL_PRIMARY_MODEL, MEAL_FALLBACK_MODEL, mealRetryDelay } from './meals';
-import { batchNotices, discordSend, allowedGuild } from './discord';
+import { batchNotices, discordSend, allowedGuild, type DiscordMessageInput } from './discord';
 import { todayKst, validDate } from './time';
 import { dueReminders, validateSchedules } from './schedule';
 import { claim, deliveryIntent, dispatch, enqueue, nowIso, recover, reserveLlm, retryJob, saveNotices, sourceFailure } from './storage';
+import {cacheMealSources,mealImageSource,mealWindow,pruneMealContent} from './meal-cache';
 export async function getSchedules(env:Env):Promise<Schedule[]> {
  const rows=await env.DB.prepare('SELECT data,active FROM schedules').all<{data:string;active:number}>();
  return validateSchedules(rows.results.map(r=>({...JSON.parse(r.data),active:r.active===1})));
 }
-export async function mealResponse(env:Env,date:string) {
- if(!validDate(date))return '날짜를 YYYY-MM-DD 형식으로 입력하세요. 예: /meal date:2026-10-12';
- const row=await env.DB.prepare('SELECT data,source_url FROM meals WHERE start_date<=? AND end_date>=? ORDER BY extracted_at DESC LIMIT 1').bind(date,date).first<{data:string;source_url:string}>();
- if(row) return formatMeal(JSON.parse(row.data) as MealWeek,date,row.source_url);
+async function retainedMeal(env:Env,date:string) {
+ const window=mealWindow();
+ const row=await env.DB.prepare('SELECT data,source_url FROM meals WHERE start_date<=? AND end_date>=? AND start_date>=? AND end_date<=? ORDER BY extracted_at DESC LIMIT 1').bind(date,date,window.start,window.end).first<{data:string;source_url:string}>();
+ return row?{week:JSON.parse(row.data) as MealWeek,sourceUrl:row.source_url}:null;
+}
+async function unavailableMeal(env:Env,date:string) {
  const source=await env.DB.prepare("SELECT source_url FROM health WHERE id='meal-discovery'").first<{source_url:string|null}>();
  return `식단 확인 불가 (${date})\n${source?.source_url??'https://scc.sogang.ac.kr/front/cmsboardlist.do?bbsConfigFK=1185&siteId=dormitory'}`;
 }
+export async function mealResponse(env:Env,date:string) {
+ if(!validDate(date))return '날짜를 YYYY-MM-DD 형식으로 입력하세요. 예: /meal date:2026-10-12';
+ const cached=await retainedMeal(env,date);
+ return cached?formatMeal(cached.week,date,cached.sourceUrl):unavailableMeal(env,date);
+}
+export async function mealCommandResponse(env:Env,date:string):Promise<DiscordMessageInput> {
+ if(!validDate(date))return mealResponse(env,date);
+ const cached=await retainedMeal(env,date),day=cached?.week.days.find(day=>day.date===date);
+ const usable=day&&([day.breakfastKorean,day.breakfastWestern,day.dinner].some(offering=>offering.status!=='unknown')||day.cupRice.status==='available');
+ if(cached&&usable)return formatMeal(cached.week,date,cached.sourceUrl);
+ const source=await mealImageSource(env,date);
+ if(!source)return cached?formatMeal(cached.week,date,cached.sourceUrl):unavailableMeal(env,date);
+ return {content:`${date} 식단 텍스트를 확인하지 못해 공식 주간 메뉴표를 안내합니다.\n원문: <${source.url}>`,embeds:[{title:`벨라르미노 주간 메뉴 (${source.start} ~ ${source.end})`,url:source.url,image:{url:source.imageUrl}}]};
+}
 export async function planCron(env:Env,scheduledTime:number) {
+ await pruneMealContent(env);
  await recover(env);
  const hours=Number(env.SOURCE_INTERVAL_HOURS??'6');
  const interval=(Number.isFinite(hours)&&hours>=1?hours:6)*3600_000;
@@ -61,8 +79,13 @@ export async function executeJob(env:Env,job:Job) {
  break;
  }
  case 'meal-discover': {
- const info=await discoverMeal();
+ await pruneMealContent(env);
+ const sources=await discoverMealSources();
+ await cacheMealSources(env,sources);
+ const info=sources.find(source=>source.start<=todayKst()&&source.end>=todayKst())??sources[0];
+ if(!info)break;
  await env.DB.prepare("INSERT INTO health(id,last_attempt,last_success,source_url,error) VALUES('meal-discovery',?,?,?,NULL) ON CONFLICT(id) DO UPDATE SET last_attempt=excluded.last_attempt,last_success=excluded.last_success,source_url=excluded.source_url,error=NULL").bind(nowIso(),nowIso(),info.url).run();
+ if(payload.sourceOnly===true||env.LLM_ENABLED!=='true'||!env.OPENROUTER_API_KEY)break;
  const image=await fetchImage(info.imageUrl);
  const version=env.PROCESSING_VERSION??'meal-v4-retry-free';
  const key=`${image.hash}:${version}:${info.start}:${info.end}:${info.url}`;
@@ -72,6 +95,10 @@ export async function executeJob(env:Env,job:Job) {
  break;
  }
  case 'meal-extract': {
+ const window=mealWindow();
+ if(payload.start<window.start||payload.end>window.end){
+ await env.DB.prepare("UPDATE jobs SET state='needs_review',lease_until=NULL,error='Meal outside retained weeks; not inferred' WHERE id=?").bind(job.id).run();break;
+ }
  let image:Awaited<ReturnType<typeof fetchImage>>;
  try{image=await fetchImage(payload.imageUrl);}catch{throw new MealExtractionError('Meal image preflight failed',null,true);}
  if(image.hash!==payload.hash) throw new MealExtractionError('Meal image changed; rediscovery required');
@@ -87,7 +114,14 @@ export async function executeJob(env:Env,job:Job) {
  const models=payload.models??[env.MEAL_MODEL??MEAL_PRIMARY_MODEL,env.MEAL_FALLBACK_MODEL??MEAL_FALLBACK_MODEL];
  const model=models[job.attempts<=MEAL_ATTEMPTS_PER_MODEL?0:1];
  const result=await extractMeal({...env,MEAL_MODEL:model},image,{start:payload.start,end:payload.end,published:payload.published},{allowPromptOnlyJson:payload.promptOnlyJsonModel===model,...(payload.disableReasoning===true?{disableReasoning:true}:{})});
- const at=nowIso();
+ const at=nowIso(),currentWindow=mealWindow();
+ if(payload.start<currentWindow.start||payload.end>currentWindow.end){
+ await env.DB.batch([
+ env.DB.prepare("UPDATE llm_usage SET actual_usd=CASE WHEN ? IS NULL THEN actual_usd ELSE COALESCE(actual_usd,0)+? END,state='completed' WHERE id=?").bind(result.actualCost,result.actualCost,job.id),
+ env.DB.prepare("UPDATE jobs SET state='needs_review',lease_until=NULL,error='Meal completed after retention window; result not cached' WHERE id=?").bind(job.id)
+ ]);
+ break;
+ }
  await env.DB.batch([
  env.DB.prepare('INSERT OR IGNORE INTO meals(cache_key,source_url,image_hash,version,start_date,end_date,data,extracted_at,verified_at,model) VALUES(?,?,?,?,?,?,?,?,?,?)').bind(payload.key,payload.url,image.hash,payload.version,payload.start,payload.end,JSON.stringify(result.week),at,at,result.model),
  env.DB.prepare("UPDATE llm_usage SET actual_usd=CASE WHEN ? IS NULL THEN actual_usd ELSE COALESCE(actual_usd,0)+? END,state='completed' WHERE id=?").bind(result.actualCost,result.actualCost,job.id),

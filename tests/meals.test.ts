@@ -14,6 +14,10 @@ describe('strict observed meal validation',()=>{
  it('rejects uncertainty/banner conflict and title-publication conflict',()=>{expect(()=>validateMeal({...sample(),certain:false},expected)).toThrow();expect(()=>validateMeal({...sample(),start:'2026-10-19'},expected)).toThrow();expect(()=>validateMeal(sample(),{...expected,published:'2025-01-01'})).toThrow();});
  it('distinguishes unknown from explicit closed and requires evidence',()=>{const x=sample();x.days[0].dinner={status:'closed',items:[],time:null,evidence:'휴무'};const w=validateMeal(x,expected);expect(formatMeal(w,'2026-10-12','https://school.example')).toContain('석식: 미운영');expect(formatMeal(w,'2026-10-13','https://school.example')).toContain('석식: 확인 불가');x.days[0].dinner.evidence='';expect(()=>validateMeal(x,expected)).toThrow();});
  it('shows cup rice on ANY day only with date-specific evidence, checks explicit time',()=>{const x=sample();x.days[0].cupRice={status:'available',items:['컵밥'],time:'11:40' as never,evidence:'10/12 컵밥 11:40'};const w=validateMeal(x,expected);expect(formatMeal(w,'2026-10-12','https://school.example')).toContain('컵밥: 컵밥 (11:40)');expect(formatMeal(w,'2026-10-13','https://school.example')).not.toContain('컵밥:');x.days[0].cupRice.evidence='컵밥';expect(()=>validateMeal(x,expected)).toThrow();});
+ it('accepts imperfect menu spelling without weakening date or offering validation',()=>{
+  const x=sample();x.days[0].breakfastKorean={status:'available',items:['메뉴 오타'],time:null,evidence:'10/12 메뉴'};
+  expect(validateMeal(x,expected).days[0].breakfastKorean.items).toEqual(['메뉴 오타']);
+ });
  it('rejects invalid enum/types and available menu without evidence',()=>{const x=sample() as any;x.days[0].dinner.status='false';expect(()=>validateMeal(x,expected)).toThrow();x.days[0].dinner={status:'available',items:['Rice'],time:null,evidence:''};expect(()=>validateMeal(x,expected)).toThrow();});
  it('does not show expired cached meal as current',()=>{const w=validateMeal(sample(),expected);expect(formatMeal(w,'2026-10-19','https://school.example')).toBe('2026-10-19 식단 확인 불가\n원문: <https://school.example>');});
  it('reuses only same image, version, source and period',()=>{const id={image_hash:'abc',version:'v1',source_url:'https://school.example',start_date:expected.start,end_date:expected.end};expect(reusableMeal(id,id)).toBe(true);for(const field of Object.keys(id))expect(reusableMeal(id,{...id,[field]:'changed'})).toBe(false);});
@@ -24,7 +28,7 @@ describe('strict observed meal validation',()=>{
   expect(fetcher.mock.calls[0][1].redirect).toBe('manual');expect(fetcher.mock.calls[1][1].redirect).toBe('manual');
   const body=JSON.parse(fetcher.mock.calls[1][1].body);expect(body.max_tokens).toBe(6000);expect(body.provider.require_parameters).toBe(true);
   expect(body.provider.max_price).toEqual({prompt:0,completion:0,image:0,request:0});expect(body.response_format.json_schema.strict).toBe(true);expect(body).not.toHaveProperty('reasoning');
-  expect(body.messages[0].content[1].image_url.url).toBe('data:image/jpeg;base64,/9j/');expect(body.messages[0].content[0].text).not.toContain(expected.start);
+  expect(body.messages[0].content[1].image_url.url).toBe('data:image/jpeg;base64,/9j/');expect(body.messages[0].content[0].text).not.toContain(expected.start);expect(body.messages[0].content[0].text).toContain('certain refers ONLY to observed date');expect(body.messages[0].content[0].text).toContain('minor spelling errors are acceptable');
  });
  it('disables optional reasoning only when requested, preserving model-specific format and free routing',async()=>{
   for(const id of ['dots-studio/dots-3-note-preview:free','nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free']){

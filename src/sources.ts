@@ -1,5 +1,7 @@
 import { parse, type DefaultTreeAdapterMap } from 'parse5';
 import type { Notice, Source } from './types';
+import {mealWindow,type MealSource} from './meal-cache.ts';
+import {todayKst} from './time.ts';
 
 type Node = DefaultTreeAdapterMap['node'];
 const children = (n: Node): Node[] => 'childNodes' in n ? n.childNodes : [];
@@ -118,16 +120,28 @@ export function parseMealImage(input:string,article:{url:string;start:string;end
  const image=one(one(doc,n=>cls(n,'post_cont')),n=>tag(n,'img'));const u=new URL(attr(image,'src'),article.url);if(u.protocol==='http:'&&u.hostname==='scc.sogang.ac.kr')u.protocol='https:';validateImageUrl(u.href);return u.href;
 }
 function validateImageUrl(url:string):void {const u=new URL(url);if(u.origin!=='https://scc.sogang.ac.kr'||!/^\/dataview\/board\/1185\/[^/]+\.(?:png|jpe?g)$/i.test(u.pathname)||u.search||u.hash||u.username||u.password)throw new Error('Disallowed meal image');}
-export async function discoverMeal():Promise<{url:string;imageUrl:string;published:string;start:string;end:string}> {
- const today=new Date(Date.now()+9*3600000).toISOString().slice(0,10);const candidates=[];
+async function mealCandidates(today:string,includeUpcoming=false):Promise<Omit<MealSource,'imageUrl'>[]> {
+ const candidates:Omit<MealSource,'imageUrl'>[]=[],window=mealWindow(today);
  for(let page=1;page<=2;page++){
   const u=new URL(MEAL_SOURCE_URL);u.searchParams.set('currentPage',String(page));candidates.push(...parseMealList(await html(u.href)));
-  // Unrelated older partial-week posts must not block a validated current week's menu.
-  if(candidates.some(a=>a.start<=today&&a.end>=today)) break;
+  // A retained applicable source must not be blocked by irrelevant older partial weeks.
+  if(candidates.some(a=>a.start<=today&&a.end>=today||(includeUpcoming&&a.start>=window.start&&a.end<=window.end)))break;
  }
- // Prefer today's applicable post; otherwise expose newest known source without pretending it is today's menu.
- const sorted=candidates.sort((a,b)=>b.published.localeCompare(a.published));const chosen=sorted.find(a=>a.start<=today&&a.end>=today)??sorted[0];
+ return candidates.sort((a,b)=>b.published.localeCompare(a.published));
+}
+export async function discoverMeal():Promise<MealSource> {
+ const today=todayKst(new Date(Date.now())),sorted=await mealCandidates(today);
+ // Preserve the legacy preference without pretending a stale/newest post covers today.
+ const chosen=sorted.find(a=>a.start<=today&&a.end>=today)??sorted[0];
  return {...chosen,imageUrl:parseMealImage(await html(chosen.url),chosen)};
+}
+export async function discoverMealSources():Promise<MealSource[]> {
+ const today=todayKst(new Date(Date.now())),window=mealWindow(today),candidates=await mealCandidates(today,true);
+ const retained=new Map<string,Omit<MealSource,'imageUrl'>>();
+ for(const candidate of candidates)if(candidate.start>=window.start&&candidate.end<=window.end&&!retained.has(candidate.start))retained.set(candidate.start,candidate);
+ const result:MealSource[]=[];
+ for(const candidate of retained.values())result.push({...candidate,imageUrl:parseMealImage(await html(candidate.url),candidate)});
+ return result;
 }
 export async function fetchImage(url:string):Promise<{bytes:Uint8Array;mime:string;hash:string}> {
  validateImageUrl(url);const r=await sourceBytes(url,5*1024*1024);const b=r.bytes;const png=b.length>=8&&[137,80,78,71,13,10,26,10].every((v,i)=>b[i]===v);const jpeg=b.length>=4&&b[0]===255&&b[1]===216&&b[2]===255;

@@ -1,6 +1,6 @@
 import {readFileSync} from 'node:fs';
 import {describe,it,expect,vi,afterEach} from 'vitest';
-import {SOURCES,parseUniversity,parseComputing,parseMealList,parseMealImage,mealPeriod,sourceBytes,fetchImage,discoverMeal} from '../src/sources';
+import {SOURCES,parseUniversity,parseComputing,parseMealList,parseMealImage,mealPeriod,sourceBytes,fetchImage,discoverMeal,discoverMealSources} from '../src/sources';
 const fixture=(name:string)=>readFileSync(new URL(`./fixtures/${name}`,import.meta.url),'utf8');
 afterEach(()=>{vi.unstubAllGlobals();vi.restoreAllMocks();});
 describe('official source adapters with synthetic fixtures',()=>{
@@ -30,6 +30,31 @@ describe('official source adapters with synthetic fixtures',()=>{
  });
  it('bounds streaming response even without Content-Length',async()=>{vi.stubGlobal('fetch',vi.fn(async()=>new Response(new Uint8Array(10),{headers:{'content-type':'text/html'}})));await expect(sourceBytes(SOURCES[0].url,5)).rejects.toThrow('too large');});
  it('rejects image format spoofing',async()=>{vi.stubGlobal('fetch',vi.fn(async()=>new Response('not an image',{headers:{'content-type':'image/jpeg'}})));await expect(fetchImage('https://scc.sogang.ac.kr/dataview/board/1185/fake.jpg')).rejects.toThrow('Invalid image');});
+ it('discovers current and upcoming sources once each, choosing the latest per period',async()=>{
+  vi.spyOn(Date,'now').mockReturnValue(Date.parse('2026-10-13T00:00:00Z'));
+  const list=fixture('meal-list.html'),row=list.match(/<li>.*<\/li>/)![0];
+  const newest=row.replaceAll('123','125').replace('2026.10.08','2026.10.09');
+  const next=row.replaceAll('123','124').replaceAll('12일 ~ 10월 18일','19일 ~ 10월 25일').replace('2026.10.08','2026.10.10');
+  const fetcher=vi.fn(async(url:unknown)=>{
+   const u=new URL(String(url));
+   if(u.pathname.endsWith('cmsboardlist.do')){if(u.searchParams.get('currentPage')!=='1')throw new Error('Older history must not be fetched');return new Response(list.replace('</ul>',newest+next+'</ul>'),{headers:{'content-type':'text/html'}});}
+   const id=u.searchParams.get('pkid')!;let article=fixture('meal-article.html').replaceAll('123',id).replace('synthetic.jpg',`${id}.jpg`);
+   if(id==='124')article=article.replaceAll('12일 ~ 10월 18일','19일 ~ 10월 25일');
+   return new Response(article,{headers:{'content-type':'text/html'}});
+  });vi.stubGlobal('fetch',fetcher);
+  const result=await discoverMealSources();expect(result.map(r=>r.start).sort()).toEqual(['2026-10-12','2026-10-19']);expect(result.find(r=>r.start==='2026-10-12')!.url).toContain('125');expect(fetcher).toHaveBeenCalledTimes(3);
+ });
+ it('returns the current source without inventing an unpublished next week',async()=>{
+  vi.spyOn(Date,'now').mockReturnValue(Date.parse('2026-10-13T00:00:00Z'));
+  const fetcher=vi.fn(async(url:unknown)=>new Response(fixture(String(url).includes('cmsboardlist.do')?'meal-list.html':'meal-article.html'),{headers:{'content-type':'text/html'}}));vi.stubGlobal('fetch',fetcher);
+  expect((await discoverMealSources()).map(r=>r.start)).toEqual(['2026-10-12']);expect(fetcher).toHaveBeenCalledTimes(2);
+ });
+ it('does not resolve images for stale-only source lists',async()=>{
+  vi.spyOn(Date,'now').mockReturnValue(Date.parse('2026-10-13T00:00:00Z'));
+  const stale=fixture('meal-list.html').replaceAll('12일 ~ 10월 18일','5일 ~ 10월 11일').replace('2026.10.08','2026.10.01');
+  const fetcher=vi.fn(async(url:unknown)=>{expect(String(url)).toContain('cmsboardlist.do');return new Response(stale,{headers:{'content-type':'text/html'}});});vi.stubGlobal('fetch',fetcher);
+  expect(await discoverMealSources()).toEqual([]);expect(fetcher).toHaveBeenCalledTimes(2);
+ });
  it('stops paging after a validated current week and still rejects historical partial weeks',async()=>{
   vi.spyOn(Date,'now').mockReturnValue(Date.parse('2026-10-13T00:00:00Z'));
   const fetcher=vi.fn(async(url:unknown)=>{

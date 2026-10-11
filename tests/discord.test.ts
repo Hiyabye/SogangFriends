@@ -45,6 +45,14 @@ describe('Discord message safety', () => {
     expect(data.content.length).toBeLessThanOrEqual(2000);
     expect(data.content).not.toMatch(/[\uD800-\uDBFF]…$/u);
   });
+  it('forwards image embeds, bounds content and overrides mention parsing without forwarding arbitrary fields', () => {
+    const embeds = [{ title: '공식 주간 식단', url: 'https://school.example/menu', image: { url: 'https://school.example/menu.jpg' } }];
+    const input = { content: '@everyone ' + '😀'.repeat(2000), embeds, allowed_mentions: { parse: ['everyone'] }, flags: 64 };
+    const data = message(input);
+    expect(data.embeds).toEqual(embeds);expect(data.content.length).toBeLessThanOrEqual(2000);
+    expect(data.allowed_mentions).toEqual({ parse: [] });expect(data).not.toHaveProperty('flags');
+    expect(message('plain text')).toEqual({ content: 'plain text', allowed_mentions: { parse: [] } });
+  });
   it('packs bounded notices and retains every source link', () => {
     const notices = Array.from({ length: 10 }, (_, i) => ({ id: String(i), source: '학사', title: '@everyone ' + '가'.repeat(1500), published: '2026-10-09', url: `https://www.sogang.ac.kr/notice/${i}` }));
     const batches = batchNotices(notices);
