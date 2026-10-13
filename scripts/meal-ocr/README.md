@@ -47,10 +47,14 @@ must also accept at least one real source; an empty batch cannot verify runtime.
 Artifacts contain only results/diagnostics for three days, no source images or
 third-party engine logs. A changed weight digest requires review, not silent use.
 
-**Actions/Linux execution is not yet proven.** Local native execution and
-hash verification passed, but Docker's local daemon is unavailable. Existing
-OpenRouter code remains intact until the replacement verification gate is met.
-No live workflow, remote ingestion, deployment, commit or push has occurred.
+**Actual Actions/Linux verification passed** in [run 38345856766](https://github.com/Hiyabye/SogangFriends/actions/runs/38345856766)
+on Ubuntu 24.04/Python 3.11. Both CPU engines ran, all four weight digests matched,
+and October 12–18 was accepted with EasyOCR after Paddle missed a weekday.
+`actions-verification.json` records reviewed provenance and observed dates;
+Worker regression tests independently accept its identity. This was `ingest=false`:
+no D1 writes, Discord posts, OpenRouter calls or deployment. The staged OCR commit
+was pushed with approval; subsequent OpenRouter retirement remains local.
+Remote ingestion, dedicated-secret setup and scheduled activation remain unapproved.
 
 ## Original diagnostic tool
 

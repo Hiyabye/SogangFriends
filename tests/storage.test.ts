@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { testDatabase } from './helpers/db';
-import { claim, deliveryIntent, dispatch, enqueue, recover, reserveLlm, retryJob, saveNotices, sourceFailure } from '../src/storage';
+import { claim, deliveryIntent, dispatch, enqueue, recover, retryJob, saveNotices, sourceFailure } from '../src/storage';
 import { consume, executeJob } from '../src/jobs';
 import type { Job, Notice } from '../src/types';
 
@@ -54,20 +54,6 @@ describe('D1-style storage with actual SQLite',()=>{
   const third=await claim(db.env,'same');expect(third!.attempts).toBe(3);
   await retryJob(db.env,third!,'temporary',1);vi.advanceTimersByTime(1000);
   expect(row('jobs','same')!.state).toBe('failed');expect(await claim(db.env,'same')).toBeNull();
- });
- it('holds failed/unknown LLM reservations and enforces daily calls atomically',async()=>{
-  Object.assign(db.env,{LLM_ENABLED:'true',OPENROUTER_API_KEY:'fixture-only',LLM_DAILY_CALLS:'2',LLM_DAILY_BUDGET_USD:'0.50',LLM_MAX_CALL_USD:'0.25'});
-  const reservations=await Promise.all(['a','b','c'].map(id=>reserveLlm(db.env,id,'2026-10-09')));
-  expect(reservations.filter(Boolean)).toHaveLength(2);expect(counts('llm_usage')).toBe(2);
-  expect(await reserveLlm(db.env,'a','2026-10-09')).toBe(false);
-  expect(await reserveLlm(db.env,'next','2026-10-10')).toBe(true);
-  db.sqlite.prepare('UPDATE llm_usage SET actual_usd=1 WHERE id=?').run('next');
-  expect(await reserveLlm(db.env,'over','2026-10-10')).toBe(false);
- });
- it('fails closed with missing key, disabled extraction, and invalid budgets',async()=>{
-  expect(await reserveLlm(db.env,'a','2026-10-09')).toBe(false);
-  Object.assign(db.env,{LLM_ENABLED:'true',OPENROUTER_API_KEY:'fixture-only',LLM_DAILY_BUDGET_USD:'not-a-number'});
-  expect(await reserveLlm(db.env,'b','2026-10-09')).toBe(false);expect(counts('llm_usage')).toBe(0);
  });
  it('persists delivery intent and outbox atomically, deduplicates, and separates guild records',async()=>{
   await Promise.all([deliveryIntent(db.env,'notice:111','111','1001','hello'),deliveryIntent(db.env,'notice:111','111','1001','hello')]);

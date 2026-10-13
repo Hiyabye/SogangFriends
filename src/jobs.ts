@@ -1,11 +1,11 @@
 import type { Env, Job, Notice, MealWeek, Schedule } from './types';
 import { SOURCES, collectNotices, discoverMealSources, fetchImage } from './sources';
-import { extractMeal, formatMeal, MealExtractionError, MEAL_ATTEMPTS_PER_MODEL, MEAL_MAX_ATTEMPTS, MEAL_PRIMARY_MODEL, MEAL_FALLBACK_MODEL, mealRetryDelay } from './meals';
+import { formatMeal } from './meals';
 import { batchNotices, discordSend, allowedGuild, type DiscordMessageInput } from './discord';
 import { todayKst, validDate } from './time';
 import { validateSchedules } from './schedule';
 import { updateScheduleSummary } from './schedule-summary';
-import { claim, deliveryIntent, dispatch, enqueue, nowIso, recover, reserveLlm, retryJob, saveNotices, sourceFailure } from './storage';
+import { claim, deliveryIntent, dispatch, enqueue, nowIso, recover, retryJob, saveNotices, sourceFailure } from './storage';
 import {cacheMealSources,mealImageSource,mealWindow,pruneMealContent} from './meal-cache';
 export async function getSchedules(env:Env):Promise<Schedule[]> {
  const rows=await env.DB.prepare('SELECT data,active FROM schedules').all<{data:string;active:number}>();
@@ -90,47 +90,11 @@ export async function executeJob(env:Env,job:Job) {
  const info=sources.find(source=>source.start<=todayKst()&&source.end>=todayKst())??sources[0];
  if(!info)break;
  await env.DB.prepare("INSERT INTO health(id,last_attempt,last_success,source_url,error) VALUES('meal-discovery',?,?,?,NULL) ON CONFLICT(id) DO UPDATE SET last_attempt=excluded.last_attempt,last_success=excluded.last_success,source_url=excluded.source_url,error=NULL").bind(nowIso(),nowIso(),info.url).run();
- if(payload.sourceOnly===true||env.LLM_ENABLED!=='true'||!env.OPENROUTER_API_KEY)break;
- const image=await fetchImage(info.imageUrl);
- const version=env.PROCESSING_VERSION??'meal-v4-retry-free';
- const key=`${image.hash}:${version}:${info.start}:${info.end}:${info.url}`;
- const cached=await env.DB.prepare('SELECT cache_key FROM meals WHERE cache_key=?').bind(key).first();
- if(cached) await env.DB.prepare('UPDATE meals SET verified_at=? WHERE cache_key=?').bind(nowIso(),key).run();
- else if(env.LLM_ENABLED==='true'&&env.OPENROUTER_API_KEY) await enqueue(env,`extract:${key}`,'meal-extract',{...info,hash:image.hash,version,key,models:[env.MEAL_MODEL??MEAL_PRIMARY_MODEL,env.MEAL_FALLBACK_MODEL??MEAL_FALLBACK_MODEL]});
  break;
  }
  case 'meal-extract': {
- const window=mealWindow();
- if(payload.start<window.start||payload.end>window.end){
- await env.DB.prepare("UPDATE jobs SET state='needs_review',lease_until=NULL,error='Meal outside retained weeks; not inferred' WHERE id=?").bind(job.id).run();break;
- }
- let image:Awaited<ReturnType<typeof fetchImage>>;
- try{image=await fetchImage(payload.imageUrl);}catch{throw new MealExtractionError('Meal image preflight failed',null,true);}
- if(image.hash!==payload.hash) throw new MealExtractionError('Meal image changed; rediscovery required');
- // Only an explicitly operator-created verification job gets this extra-run allowance.
- const reservationEnv=payload.operatorExtraRun===true?{...env,LLM_DAILY_CALLS:'3',LLM_DAILY_BUDGET_USD:'0.75'}:env;
- let reserved:boolean;
- try{reserved=await reserveLlm(reservationEnv,job.id,todayKst());}catch{throw new MealExtractionError('Meal reservation preflight failed',null,true);}
- if(!reserved) {
- await env.DB.prepare("INSERT INTO health(id,last_attempt,error) VALUES('meal',?,'LLM disabled or budget blocked') ON CONFLICT(id) DO UPDATE SET last_attempt=excluded.last_attempt,error=excluded.error").bind(nowIso()).run();
- // A blocked job can be explicitly retried by operator, not on every queue redelivery.
- throw new MealExtractionError('LLM disabled or budget blocked');
- }
- const models=payload.models??[env.MEAL_MODEL??MEAL_PRIMARY_MODEL,env.MEAL_FALLBACK_MODEL??MEAL_FALLBACK_MODEL];
- const model=models[job.attempts<=MEAL_ATTEMPTS_PER_MODEL?0:1];
- const result=await extractMeal({...env,MEAL_MODEL:model},image,{start:payload.start,end:payload.end,published:payload.published},{allowPromptOnlyJson:payload.promptOnlyJsonModel===model,...(payload.disableReasoning===true?{disableReasoning:true}:{})});
- const at=nowIso(),currentWindow=mealWindow();
- if(payload.start<currentWindow.start||payload.end>currentWindow.end){
- await env.DB.batch([
- env.DB.prepare("UPDATE llm_usage SET actual_usd=CASE WHEN ? IS NULL THEN actual_usd ELSE COALESCE(actual_usd,0)+? END,state='completed' WHERE id=?").bind(result.actualCost,result.actualCost,job.id),
- env.DB.prepare("UPDATE jobs SET state='needs_review',lease_until=NULL,error='Meal completed after retention window; result not cached' WHERE id=?").bind(job.id)
- ]);
- break;
- }
- await env.DB.batch([
- env.DB.prepare('INSERT OR IGNORE INTO meals(cache_key,source_url,image_hash,version,start_date,end_date,data,extracted_at,verified_at,model) VALUES(?,?,?,?,?,?,?,?,?,?)').bind(payload.key,payload.url,image.hash,payload.version,payload.start,payload.end,JSON.stringify(result.week),at,at,result.model),
- env.DB.prepare("UPDATE llm_usage SET actual_usd=CASE WHEN ? IS NULL THEN actual_usd ELSE COALESCE(actual_usd,0)+? END,state='completed' WHERE id=?").bind(result.actualCost,result.actualCost,job.id),
- env.DB.prepare("INSERT INTO health(id,last_attempt,last_success,error) VALUES('meal',?,?,NULL) ON CONFLICT(id) DO UPDATE SET last_attempt=excluded.last_attempt,last_success=excluded.last_success,error=NULL").bind(at,at)]);
+ // Retain legacy audit data; an old Queue message must never call a model.
+ await env.DB.prepare("UPDATE jobs SET state='needs_review',lease_until=NULL,error=COALESCE(error,'Meal inference retired; use OCR') WHERE id=? AND state='running'").bind(job.id).run();
  break;
  }
  case 'meal-quarantine': {
@@ -184,15 +148,13 @@ export async function executeJob(env:Env,job:Job) {
 }
 export async function consume(env:Env,batch:MessageBatch<{id:string}>) {
  for(const msg of batch.messages) {
+ // Retire even delayed or exhausted legacy jobs before claiming/incrementing attempts.
+ // Running leases and terminal outcomes are untouched; reservations and payloads remain exact.
+ const retired=await env.DB.prepare("UPDATE jobs SET state='needs_review',lease_until=NULL,error=COALESCE(error,'Meal inference retired; use OCR') WHERE id=? AND kind='meal-extract' AND state IN ('pending','retry') RETURNING id").bind(msg.body.id).first();
+ if(retired){msg.ack();continue;}
  const job=await claim(env,msg.body.id);
- if(!job){
- // An early redelivery can follow an uncertain delayed-producer send. Keep its durable wait alive.
- const waiting=await env.DB.prepare("SELECT available_at FROM jobs WHERE id=? AND kind='meal-extract' AND state='retry' AND attempts<? AND available_at>?").bind(msg.body.id,MEAL_MAX_ATTEMPTS,nowIso()).first<{available_at:string}>();
- if(waiting)await env.JOBS.send({id:msg.body.id},{delaySeconds:Math.min(86400,Math.max(1,Math.ceil((Date.parse(waiting.available_at)-Date.now())/1000)))});
- msg.ack();continue;
- }
+ if(!job){msg.ack();continue;}
  let snapshotRetry:number|undefined;
- let mealRetry:number|undefined;
  try {
  if(job.kind==='interaction') {const {completeInteraction}=await import('./worker');await completeInteraction(env,job);}
  else await executeJob(env,job);
@@ -203,24 +165,10 @@ export async function consume(env:Env,batch:MessageBatch<{id:string}>) {
  const sourceError=(job.kind==='collect'||job.kind==='notice-snapshot'||job.kind==='meal-discover')?(error instanceof Error?error.message.slice(0,300):'source job failed'):null;
  if(job.kind==='collect'||job.kind==='notice-snapshot') await env.DB.prepare('UPDATE sources SET error=? WHERE id=?').bind(sourceError,JSON.parse(job.payload).source).run();
  if(job.kind==='meal-discover') await env.DB.prepare("INSERT INTO health(id,last_attempt,error) VALUES('meal-discovery',?,?) ON CONFLICT(id) DO UPDATE SET last_attempt=excluded.last_attempt,error=excluded.error").bind(nowIso(),sourceError).run();
- // No automatic billable replay or webhook replay after ambiguous outcomes.
- if(job.kind==='meal-extract' && error instanceof MealExtractionError && error.actualCost!==null) await env.DB.prepare("UPDATE llm_usage SET actual_usd=COALESCE(actual_usd,0)+?,state='rejected' WHERE id=?").bind(error.actualCost,job.id).run();
- if(job.kind==='meal-extract' && error instanceof MealExtractionError && error.safeRetry) {
- await env.DB.prepare("UPDATE llm_usage SET state='safe_retry' WHERE id=?").bind(job.id).run();
- const verificationOnly=JSON.parse(job.payload).verificationOnly===true;
- const phase=job.attempts<=MEAL_ATTEMPTS_PER_MODEL?'primary':'fallback';
- const reason=job.attempts>=MEAL_MAX_ATTEMPTS?`Meal 5+5 attempts exhausted; operator model choice required: ${error.message}`:`OpenRouter ${phase} attempt ${(job.attempts-1)%MEAL_ATTEMPTS_PER_MODEL+1}/${MEAL_ATTEMPTS_PER_MODEL}: ${error.message}`;
- const delay=mealRetryDelay(job.attempts,error.retryAfter);
- if(verificationOnly)await env.DB.prepare("UPDATE jobs SET state='needs_review',lease_until=NULL,error=? WHERE id=?").bind(`One-off meal verification rejected: ${error.message}`,job.id).run();
- else await retryJob(env,job,reason,delay);
- await env.DB.prepare("INSERT INTO health(id,last_attempt,error) VALUES('meal',?,?) ON CONFLICT(id) DO UPDATE SET last_attempt=excluded.last_attempt,error=excluded.error").bind(nowIso(),verificationOnly?`One-off verification rejected: ${error.message}`:reason).run();
- if(!verificationOnly&&job.attempts<MEAL_MAX_ATTEMPTS)mealRetry=delay;
- } else if(job.kind==='interaction') {
+ if(job.kind==='interaction') {
  await retryJob(env,job,'interaction completion failed',5);
  } else if(job.kind==='meal-extract') {
- const reason=error instanceof MealExtractionError?error.message:'meal extraction blocked/failed; inspect source and budget';
- await env.DB.prepare("UPDATE jobs SET state='needs_review',lease_until=NULL,error=? WHERE id=?").bind(reason,job.id).run();
- await env.DB.prepare("INSERT INTO health(id,last_attempt,error) VALUES('meal',?,?) ON CONFLICT(id) DO UPDATE SET last_attempt=excluded.last_attempt,error=excluded.error").bind(nowIso(),reason).run();
+ await env.DB.prepare("UPDATE jobs SET state='needs_review',lease_until=NULL,error=COALESCE(error,'Meal inference retired; use OCR') WHERE id=? AND state='running'").bind(job.id).run();
  } else if(job.kind==='notice-snapshot'&&Date.now()-Date.parse(job.created_at)>30*60_000) {
  await env.DB.prepare("UPDATE jobs SET state='failed',lease_until=NULL,error='Notice snapshot expired' WHERE id=?").bind(job.id).run();
  } else {
@@ -232,8 +180,6 @@ export async function consume(env:Env,batch:MessageBatch<{id:string}>) {
  }
  // Tokens persist only while waiting; clear after any terminal interaction attempt.
  if(job.kind==='interaction') await env.DB.prepare("UPDATE jobs SET payload='{}' WHERE id=? AND state IN ('done','failed','needs_review')").bind(job.id).run();
- // Fresh messages reset Queue delivery retries; D1 still enforces the ten-attempt model ceiling.
- if(mealRetry!==undefined)await env.JOBS.send({id:job.id},{delaySeconds:Math.min(86400,mealRetry)});
  if(snapshotRetry===undefined)msg.ack();else msg.retry({delaySeconds:snapshotRetry});
  }
  await dispatch(env);

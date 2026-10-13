@@ -1,0 +1,46 @@
+{
+  "runId": "38345856766",
+  "url": "https://github.com/Hiyabye/SogangFriends/actions/runs/38345856766",
+  "commit": "945848d48016b40e545d67f332eb09537a4235b1",
+  "platform": "Ubuntu 24.04 / Python 3.11 / x86_64 CPU",
+  "ingest": false,
+  "conclusion": "success",
+  "nativeRuntimeVerified": true,
+  "checkedWeightDigestsMatch": true,
+  "processed": 1,
+  "failed": 0,
+  "packages": {
+    "paddleocr": "3.3.2",
+    "paddlepaddle": "3.2.2",
+    "easyocr": "1.7.2",
+    "torch": "2.8.0+cpu",
+    "torchvision": "0.23.0+cpu",
+    "numpy": "2.4.6",
+    "opencv-contrib-python": "4.10.0.84"
+  },
+  "source": {
+    "url": "https://scc.sogang.ac.kr/front/cmsboardview.do?bbsConfigFK=1185&siteId=dormitory&pkid=941660",
+    "imageUrl": "https://scc.sogang.ac.kr/dataview/board/1185/20261008_0923_5910001.jpg",
+    "published": "2026-10-08",
+    "start": "2026-10-12",
+    "end": "2026-10-18"
+  },
+  "imageHash": "f8f5a60905a10f308495422d6ed5b7629f53f6e1a30594f46d386a05a36b0ff4",
+  "engine": "easy",
+  "attempts": [
+    {"engine": "paddle", "accepted": false, "reason": "unreadable_column_date"},
+    {"engine": "easy", "accepted": true}
+  ],
+  "identity": {
+    "banner": ["주간메 뉴표", "2026.10.12 ~10.18"],
+    "headers": [
+      ["10월 12일", "월요일"],
+      ["10월 13일", "화요일"],
+      ["10월 14일", "수요일"],
+      ["10월 15일", "목요일"],
+      ["10월 16일", "금요일"],
+      ["10월 17일", "토요일"],
+      ["10월 18일", "일요일"]
+    ]
+  }
+}

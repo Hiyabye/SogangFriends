@@ -16,14 +16,6 @@ NOTICE_COLLECTION_MODE = "external"
 # Apply D1 archive migrations 0003 + 0004 before separately approved activation.
 NOTICE_ARCHIVE_ENABLED = "true"
 MEAL_TIME_KST = "07:30"
-# Only :free models with verified zero pricing are permitted.
-MEAL_MODEL = "google/gemma-4-31b-it:free"
-MEAL_FALLBACK_MODEL = "google/gemma-4-26b-a4b-it:free"
-PROCESSING_VERSION = "meal-v4-retry-free"
-LLM_ENABLED = "true"
-LLM_DAILY_CALLS = "2"
-LLM_DAILY_BUDGET_USD = "0.50"
-LLM_MAX_CALL_USD = "0.25"
 
 [[d1_databases]]
 binding = "DB"

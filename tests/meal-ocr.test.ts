@@ -29,6 +29,11 @@ const send=async(data:unknown,key=secret)=>handleRequest(await signed(data,key),
 const count=(table:string)=>Number(db.sqlite.prepare(`SELECT COUNT(*) n FROM ${table}`).get()!.n);
 
 describe('observed OCR date identity',()=>{
+ it('accepts the actual Ubuntu Actions result independently of Python validation',()=>{
+  const result=JSON.parse(readFileSync(new URL('../scripts/meal-ocr/actions-verification.json',import.meta.url),'utf8'));
+  expect(result.ingest).toBe(false);expect(result.nativeRuntimeVerified).toBe(true);expect(result.processed).toBe(1);
+  expect(validateObservedIdentity(result.identity,result.source)).toEqual(result.identity);
+ });
  it('accepts all six real cross-week pipeline identities, including both month transitions',()=>{
   const samples=JSON.parse(readFileSync(new URL('../scripts/meal-ocr/cross-week-evaluation.json',import.meta.url),'utf8'));
   const accepted=samples.filter((sample:{accepted:boolean})=>sample.accepted);

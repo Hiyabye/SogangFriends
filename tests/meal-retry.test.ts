@@ -1,68 +1,52 @@
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 import {testDatabase} from './helpers/db';
 import {consume,executeJob} from '../src/jobs';
-import {claim,dispatch,enqueue,recover,reserveLlm,retryJob} from '../src/storage';
-import {extractMeal,MealExtractionError,MEAL_PRIMARY_MODEL,MEAL_FALLBACK_MODEL,mealRetryDelay} from '../src/meals';
+import {claim,enqueue,recover,retryJob} from '../src/storage';
 import type {Job,MealWeek} from '../src/types';
 
-vi.mock('../src/meals',async importOriginal=>({...await importOriginal<object>(),extractMeal:vi.fn()}));
-vi.mock('../src/sources',async importOriginal=>({...await importOriginal<object>(),fetchImage:vi.fn(async()=>({bytes:new Uint8Array([1]),mime:'image/png',hash:'hash'}))}));
 let db:ReturnType<typeof testDatabase>;
-const payload={imageUrl:'fixture',hash:'hash',start:'2026-10-05',end:'2026-10-11',published:'2026-10-01',url:'https://scc.sogang.ac.kr/front/cmsboardview.do?pkid=941444',version:'meal-v4-retry-free',key:'fixture-key',models:[MEAL_PRIMARY_MODEL,MEAL_FALLBACK_MODEL]};
+const historicalModel='google/gemma-4-31b-it:free';
+const payload={imageUrl:'fixture',hash:'hash',start:'2026-10-05',end:'2026-10-11',published:'2026-10-01',url:'https://scc.sogang.ac.kr/front/cmsboardview.do?pkid=941444',version:'meal-v4-retry-free',key:'fixture-key',models:[historicalModel]};
 const offering=()=>({status:'unknown' as const,items:[],time:null,evidence:''});
 const week:MealWeek={start:payload.start,end:payload.end,certain:true,days:Array.from({length:7},(_,i)=>({date:`2026-10-${String(i+5).padStart(2,'0')}`,weekday:i+1,breakfastKorean:offering(),breakfastWestern:offering(),breakfastCommon:offering(),cupRice:offering(),dinner:offering(),drinks:offering()}))};
-const message=()=>({body:{id:'meal'},ack:vi.fn(),retry:vi.fn()});
-const run=async()=>{const msg=message();await consume(db.env,{messages:[msg],queue:'fixture'} as never);return msg;};
 const row=()=>db.sqlite.prepare("SELECT * FROM jobs WHERE id='meal'").get()!;
-const usage=()=>db.sqlite.prepare("SELECT * FROM llm_usage WHERE id='meal'").get()!;
-beforeEach(async()=>{
- db=testDatabase();vi.useFakeTimers();vi.setSystemTime(new Date('2026-10-10T14:30:00Z'));
- Object.assign(db.env,{LLM_ENABLED:'true',OPENROUTER_API_KEY:'fixture',LLM_DAILY_CALLS:'2',LLM_DAILY_BUDGET_USD:'0.50',LLM_MAX_CALL_USD:'0.25'});
- vi.mocked(extractMeal).mockReset();await enqueue(db.env,'meal','meal-extract',payload);
-});
-afterEach(()=>{db.close();vi.useRealTimers();vi.restoreAllMocks();});
+async function run(){const msg={body:{id:'meal'},ack:vi.fn(),retry:vi.fn()};await consume(db.env,{messages:[msg],queue:'fixture'} as never);return msg;}
+beforeEach(async()=>{db=testDatabase();vi.useFakeTimers();vi.setSystemTime(new Date('2026-10-10T14:30:00Z'));await enqueue(db.env,'meal','meal-extract',payload);});
+afterEach(()=>{db.close();vi.useRealTimers();vi.restoreAllMocks();vi.unstubAllGlobals();});
 
-async function quarantineFixture() {
- const owner=`extract:${payload.key}`;
- await enqueue(db.env,owner,'meal-extract',payload);
+async function quarantineFixture(){
+ const owner=`extract:${payload.key}`;await enqueue(db.env,owner,'meal-extract',payload);
  db.sqlite.prepare("UPDATE jobs SET state='done',attempts=2 WHERE id=?").run(owner);
  const insert=db.sqlite.prepare('INSERT INTO meals(cache_key,source_url,image_hash,version,start_date,end_date,data,extracted_at,verified_at,model) VALUES(?,?,?,?,?,?,?,?,?,?)');
- for(const key of [payload.key,'unrelated-cache'])insert.run(key,payload.url,payload.hash,payload.version,payload.start,payload.end,JSON.stringify(week),'2026-10-10T14:29:00Z','2026-10-10T14:29:00Z',MEAL_PRIMARY_MODEL);
+ for(const key of [payload.key,'unrelated-cache'])insert.run(key,payload.url,payload.hash,payload.version,payload.start,payload.end,JSON.stringify(week),'2026-10-10T14:29:00Z','2026-10-10T14:29:00Z',historicalModel);
  db.sqlite.prepare("INSERT INTO llm_usage(id,day,reserved_usd,actual_usd,state,created_at) VALUES(?,'2026-10-10',0.25,0,'completed','now')").run(owner);
  db.sqlite.exec("INSERT INTO llm_usage(id,day,reserved_usd,state,created_at) VALUES('old-unknown','2026-10-10',0.25,'reserved','now'); INSERT INTO health(id,last_success) VALUES('meal','2026-10-09T13:00:00Z')");
  return {owner,job:{id:'quarantine',kind:'meal-quarantine',payload:JSON.stringify({cacheKey:payload.key})} as Job};
 }
-
-describe('private meal quarantine',()=>{
+describe('private historical meal quarantine',()=>{
  it('atomically retains the exact result, removes only its serving cache, and permits lossless replay',async()=>{
-  const {owner,job}=await quarantineFixture();
-  const reservations=db.sqlite.prepare('SELECT * FROM llm_usage ORDER BY id').all();
-  const original=db.sqlite.prepare('SELECT payload FROM jobs WHERE id=?').get(owner)!.payload;
-  await executeJob(db.env,job);
-  const extraction=db.sqlite.prepare('SELECT * FROM jobs WHERE id=?').get(owner)!;
+  const {owner,job}=await quarantineFixture();const reservations=db.sqlite.prepare('SELECT * FROM llm_usage ORDER BY id').all();
+  await executeJob(db.env,job);const extraction=db.sqlite.prepare('SELECT * FROM jobs WHERE id=?').get(owner)!;
   expect(extraction).toMatchObject({state:'needs_review',attempts:2,lease_until:null});
-  const stored=JSON.parse(String(extraction.payload));expect(stored.key).toBe(JSON.parse(String(original)).key);
-  expect(stored.rejectedExtraction).toMatchObject({cacheKey:payload.key,data:week,model:MEAL_PRIMARY_MODEL,sourceUrl:payload.url,imageHash:payload.hash,version:payload.version,startDate:payload.start,endDate:payload.end,extractedAt:'2026-10-10T14:29:00Z',verifiedAt:'2026-10-10T14:29:00Z',reason:'Meal failed source-image comparison; result quarantined'});
+  const stored=JSON.parse(String(extraction.payload));expect(stored.key).toBe(payload.key);
+  expect(stored.rejectedExtraction).toMatchObject({cacheKey:payload.key,data:week,model:historicalModel,sourceUrl:payload.url,imageHash:payload.hash,version:payload.version,startDate:payload.start,endDate:payload.end,extractedAt:'2026-10-10T14:29:00Z',verifiedAt:'2026-10-10T14:29:00Z',reason:'Meal failed source-image comparison; result quarantined'});
   expect(stored.rejectedExtraction.reviewedAt).toBe(new Date().toISOString());
   expect(db.sqlite.prepare('SELECT cache_key FROM meals ORDER BY cache_key').all()).toEqual([{cache_key:'unrelated-cache'}]);
   const health=db.sqlite.prepare("SELECT * FROM health WHERE id='meal'").get()!;expect(health.last_success).toBe('2026-10-09T13:00:00Z');expect(health.error).toContain('quarantined');
   vi.advanceTimersByTime(1000);await executeJob(db.env,job);
   expect(db.sqlite.prepare('SELECT payload FROM jobs WHERE id=?').get(owner)!.payload).toBe(extraction.payload);
-  expect(db.sqlite.prepare('SELECT * FROM llm_usage ORDER BY id').all()).toEqual(reservations);expect(extractMeal).not.toHaveBeenCalled();
+  expect(db.sqlite.prepare('SELECT * FROM llm_usage ORDER BY id').all()).toEqual(reservations);
  });
  it('rolls the audit and health changes back when deleting the cache fails',async()=>{
-  const {owner,job}=await quarantineFixture();
-  const extraction=db.sqlite.prepare('SELECT * FROM jobs WHERE id=?').get(owner)!;
-  const health=db.sqlite.prepare("SELECT * FROM health WHERE id='meal'").get()!;
-  const reservations=db.sqlite.prepare('SELECT * FROM llm_usage ORDER BY id').all();
+  const {owner,job}=await quarantineFixture();const extraction=db.sqlite.prepare('SELECT * FROM jobs WHERE id=?').get(owner)!;
+  const health=db.sqlite.prepare("SELECT * FROM health WHERE id='meal'").get()!;const reservations=db.sqlite.prepare('SELECT * FROM llm_usage ORDER BY id').all();
   db.sqlite.exec("CREATE TRIGGER fail_quarantine BEFORE DELETE ON meals WHEN OLD.cache_key='fixture-key' BEGIN SELECT RAISE(ABORT,'simulated delete failure'); END");
   await expect(executeJob(db.env,job)).rejects.toThrow('simulated delete failure');
   expect(db.sqlite.prepare('SELECT * FROM jobs WHERE id=?').get(owner)).toEqual(extraction);
   expect(db.sqlite.prepare("SELECT * FROM health WHERE id='meal'").get()).toEqual(health);
   expect(db.sqlite.prepare('SELECT COUNT(*) n FROM meals').get()!.n).toBe(2);
   expect(db.sqlite.prepare('SELECT * FROM llm_usage ORDER BY id').all()).toEqual(reservations);
-  db.sqlite.exec('DROP TRIGGER fail_quarantine');await executeJob(db.env,job);
-  expect(db.sqlite.prepare('SELECT COUNT(*) n FROM meals').get()!.n).toBe(1);
+  db.sqlite.exec('DROP TRIGGER fail_quarantine');await executeJob(db.env,job);expect(db.sqlite.prepare('SELECT COUNT(*) n FROM meals').get()!.n).toBe(1);
  });
  it.each(['missing','mismatched'])('refuses deletion without a matching extraction owner (%s)',async(mode)=>{
   const {owner,job}=await quarantineFixture();
@@ -73,179 +57,40 @@ describe('private meal quarantine',()=>{
   expect(db.sqlite.prepare("SELECT error FROM health WHERE id='meal'").get()!.error).toBeNull();
  });
 });
-
-describe('durable five-plus-five meal policy',()=>{
- it('does not infer expired weeks or release their unknown reservations',async()=>{
-  vi.setSystemTime(new Date('2026-10-12T00:00:00Z'));
-  db.sqlite.prepare("INSERT INTO llm_usage(id,day,reserved_usd,state,created_at) VALUES('meal','2026-10-11',.25,'reserved',?)").run(new Date().toISOString());
-  await run();expect(extractMeal).not.toHaveBeenCalled();expect(row().state).toBe('needs_review');expect(usage().state).toBe('reserved');
+describe('retired meal inference',()=>{
+ it.each(['pending','retry'])('retires %s jobs without spending attempts or touching audit data, including delayed/exhausted jobs',async(state)=>{
+  const data={...payload,rejectedExtraction:{data:week,reason:'historical review'}};
+  db.sqlite.prepare("UPDATE jobs SET state=?,attempts=10,available_at='2099-01-01',payload=?,error='original rejection' WHERE id='meal'").run(state,JSON.stringify(data));
+  for(const status of ['reserved','safe_retry','completed','rejected','confirmed_rejected'])db.sqlite.prepare('INSERT INTO llm_usage(id,day,reserved_usd,actual_usd,state,created_at) VALUES(?,?,?,?,?,?)').run(status,'2026-10-10',.25,status==='completed'?0:null,status,'now');
+  const reservations=db.sqlite.prepare('SELECT * FROM llm_usage ORDER BY id').all();const original=row();
+  const network=vi.fn();vi.stubGlobal('fetch',network);const msg=await run();
+  expect(row()).toEqual({...original,state:'needs_review',lease_until:null});expect(msg.ack).toHaveBeenCalledOnce();expect(msg.retry).not.toHaveBeenCalled();
+  expect(db.sqlite.prepare('SELECT * FROM llm_usage ORDER BY id').all()).toEqual(reservations);
+  expect(db.env.JOBS.send).not.toHaveBeenCalled();expect(network).not.toHaveBeenCalled();
+  await run();expect(row()).toEqual({...original,state:'needs_review',lease_until:null});
  });
- it('accounts for a complete response crossing Monday without retaining the expired menu',async()=>{
-  vi.setSystemTime(new Date('2026-10-11T14:59:30Z'));
-  vi.mocked(extractMeal).mockImplementationOnce(async()=>{vi.advanceTimersByTime(120000);return {week,actualCost:0,model:MEAL_PRIMARY_MODEL};});
-  await run();expect(extractMeal).toHaveBeenCalledTimes(1);expect(usage().state).toBe('completed');expect(row().state).toBe('needs_review');expect(db.sqlite.prepare('SELECT COUNT(*) n FROM meals').get()!.n).toBe(0);
+ it('records retirement when no prior diagnostic exists and preserves a claimed job payload',async()=>{
+  const job=await claim(db.env,'meal');const original=row();await executeJob(db.env,job!);
+  expect(row()).toEqual({...original,state:'needs_review',lease_until:null,error:'Meal inference retired; use OCR'});
+  expect(db.sqlite.prepare('SELECT COUNT(*) n FROM llm_usage').get()!.n).toBe(0);
  });
- it('passes reasoning disable only for an explicitly flagged operator job',async()=>{
-  vi.mocked(extractMeal).mockRejectedValue(new MealExtractionError('Rejected',null,true));
-  await run();expect(vi.mocked(extractMeal).mock.lastCall![3]).not.toHaveProperty('disableReasoning');
-  db.sqlite.prepare("UPDATE jobs SET payload=? WHERE id='meal'").run(JSON.stringify({...payload,disableReasoning:true}));
-  vi.advanceTimersByTime(60000);await run();expect(vi.mocked(extractMeal).mock.lastCall![3]).toEqual({allowPromptOnlyJson:false,disableReasoning:true});
+ it.each(['running','done','failed','needs_review'])('does not reset an existing %s outcome or lease',async(state)=>{
+  db.sqlite.prepare("UPDATE jobs SET state=?,attempts=4,lease_until='2099-01-01',error='historical reason' WHERE id='meal'").run(state);
+  const original=row();await run();expect(row()).toEqual(original);expect(db.env.JOBS.send).not.toHaveBeenCalled();
  });
- it('retries image preflight failure without inference or a reservation, redacting source errors',async()=>{
-  vi.spyOn(await import('../src/sources'),'fetchImage').mockRejectedValueOnce(new Error('private-upstream-body'));
-  await run();expect(row().state).toBe('retry');expect(row().error).toContain('Meal image preflight failed');expect(row().error).not.toContain('private-upstream-body');
-  expect(extractMeal).not.toHaveBeenCalled();expect(db.sqlite.prepare('SELECT COUNT(*) n FROM llm_usage').get()!.n).toBe(0);
- });
- it('does not retry an image identity change or consume an LLM reservation',async()=>{
-  vi.spyOn(await import('../src/sources'),'fetchImage').mockResolvedValueOnce({bytes:new Uint8Array([1]),mime:'image/png',hash:'changed'});
-  await run();expect(row()).toMatchObject({state:'needs_review',error:'Meal image changed; rediscovery required'});
-  expect(extractMeal).not.toHaveBeenCalled();expect(db.env.JOBS.send).not.toHaveBeenCalled();
- });
- it('retries a reservation preflight exception before inference, without exposing the database error',async()=>{
-  const prepare=db.env.DB.prepare.bind(db.env.DB);
-  vi.spyOn(db.env.DB,'prepare').mockImplementation(sql=>sql.startsWith('SELECT state,reserved_usd,day FROM llm_usage')?{bind:()=>({first:async()=>{throw new Error('private-db-details');}})} as any:prepare(sql));
-  await run();expect(row().state).toBe('retry');expect(row().error).toContain('Meal reservation preflight failed');expect(row().error).not.toContain('private-db-details');expect(extractMeal).not.toHaveBeenCalled();
- });
- it('retains a safe fixed transport diagnostic and an uncertain reservation without replay',async()=>{
-  vi.mocked(extractMeal).mockRejectedValue(new MealExtractionError('Model service transport failed'));
-  await run();expect(row()).toMatchObject({state:'needs_review',error:'Model service transport failed'});expect(usage().state).toBe('reserved');expect(db.env.JOBS.send).not.toHaveBeenCalled();
- });
- it('scopes prompt-only JSON to the snapshotted NVIDIA fallback',async()=>{
-  const models=['dots-studio/dots-3-note-preview:free','nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free'];
-  db.sqlite.prepare("UPDATE jobs SET payload=? WHERE id='meal'").run(JSON.stringify({...payload,models,promptOnlyJsonModel:models[1]}));
-  vi.mocked(extractMeal).mockRejectedValue(new MealExtractionError('Rejected',null,true));
-  for(const delay of [60,120,240,480,60]){await run();expect(vi.mocked(extractMeal).mock.lastCall![3]).toEqual({allowPromptOnlyJson:false});vi.advanceTimersByTime(delay*1000);}
-  await run();expect(vi.mocked(extractMeal).mock.lastCall![0].MEAL_MODEL).toBe(models[1]);expect(vi.mocked(extractMeal).mock.lastCall![3]).toEqual({allowPromptOnlyJson:true});
- });
- it('allows only a third operator run without changing ordinary caps or clearing previous reservations',async()=>{
-  db.sqlite.exec("INSERT INTO llm_usage(id,day,reserved_usd,state,created_at) VALUES('old-1','2026-10-10',0.25,'safe_retry','now'),('old-2','2026-10-10',0.25,'safe_retry','now')");
-  db.sqlite.prepare("UPDATE jobs SET payload=? WHERE id='meal'").run(JSON.stringify({...payload,operatorExtraRun:true}));
-  vi.mocked(extractMeal).mockResolvedValue({week,actualCost:0,model:MEAL_PRIMARY_MODEL});
-  await run();expect(row().state).toBe('done');expect(extractMeal).toHaveBeenCalledTimes(1);
-  expect(db.env.LLM_DAILY_CALLS).toBe('2');expect(db.env.LLM_DAILY_BUDGET_USD).toBe('0.50');
-  expect(db.sqlite.prepare("SELECT COUNT(*) n FROM llm_usage WHERE state='safe_retry' AND reserved_usd=0.25 AND actual_usd IS NULL").get()!.n).toBe(2);
-  for(const operatorExtraRun of [false,true]){
-   const id='extra-'+operatorExtraRun;await enqueue(db.env,id,'meal-extract',{...payload,operatorExtraRun});
-   await consume(db.env,{messages:[{body:{id},ack:vi.fn()}],queue:'fixture'} as never);
-   expect(db.sqlite.prepare('SELECT state FROM jobs WHERE id=?').get(id)!.state).toBe('needs_review');
-  }
-  expect(extractMeal).toHaveBeenCalledTimes(1);expect(db.sqlite.prepare('SELECT COUNT(*) n FROM llm_usage').get()!.n).toBe(3);
- });
- it('stops an operator one-off verification after its first confirmed rejection',async()=>{
-  db.sqlite.prepare("UPDATE jobs SET payload=? WHERE id='meal'").run(JSON.stringify({...payload,models:['dots-studio/dots-3-note-preview:free'],verificationOnly:true}));
-  vi.mocked(extractMeal).mockRejectedValue(new MealExtractionError('Model service HTTP 429',null,true));
-  await run();expect(row()).toMatchObject({state:'needs_review',attempts:1});
-  expect(usage().state).toBe('safe_retry');expect(db.env.JOBS.send).not.toHaveBeenCalled();
-  await run();expect(extractMeal).toHaveBeenCalledTimes(1);
- });
- it('selects five primary then five fallback attempts, delays each fresh message, and stops for operator choice',async()=>{
-  vi.mocked(extractMeal).mockRejectedValue(new MealExtractionError('Model service HTTP 429 (inference)',null,true));
-  const delays=[60,120,240,480,60,60,120,240,480];
-  for(let attempt=1;attempt<=10;attempt++){
-   const msg=await run();expect(msg.ack).toHaveBeenCalledTimes(1);expect(msg.retry).not.toHaveBeenCalled();
-   expect(row().attempts).toBe(attempt);
-   expect(vi.mocked(extractMeal).mock.calls[attempt-1][0].MEAL_MODEL).toBe(attempt<=5?MEAL_PRIMARY_MODEL:MEAL_FALLBACK_MODEL);
-   if(attempt<10){
-    expect(row().state).toBe('retry');expect(Date.parse(String(row().available_at))-Date.now()).toBe(delays[attempt-1]*1000);
-    expect(db.env.JOBS.send).toHaveBeenLastCalledWith({id:'meal'},{delaySeconds:delays[attempt-1]});
-    vi.advanceTimersByTime(delays[attempt-1]*1000);
-   }
-  }
-  expect(row().state).toBe('needs_review');expect(row().error).toContain('5+5 attempts exhausted');
-  expect(db.sqlite.prepare("SELECT error FROM health WHERE id='meal'").get()!.error).toContain('operator model choice required');
-  expect(usage()).toMatchObject({day:'2026-10-10',state:'safe_retry',reserved_usd:0.25,actual_usd:null});
-  expect(db.sqlite.prepare('SELECT COUNT(*) AS n FROM llm_usage').get()!.n).toBe(1);
-  expect(db.env.JOBS.send).toHaveBeenCalledTimes(9);
-  await run();expect(extractMeal).toHaveBeenCalledTimes(10);
- });
- it('stores a successful fallback response after all five primary rejections and stops immediately',async()=>{
-  vi.mocked(extractMeal).mockRejectedValue(new MealExtractionError('Rejected',null,true));
-  for(const delay of [60,120,240,480,60]){await run();vi.advanceTimersByTime(delay*1000);}
-  vi.mocked(extractMeal).mockResolvedValue({week,actualCost:0,model:MEAL_FALLBACK_MODEL});
-  await run();expect(row()).toMatchObject({state:'done',attempts:6});
-  expect(db.sqlite.prepare('SELECT model FROM meals').get()!.model).toBe(MEAL_FALLBACK_MODEL);
-  expect(usage()).toMatchObject({state:'completed',actual_usd:0});
-  await run();expect(extractMeal).toHaveBeenCalledTimes(6);
- });
- it('honors a longer Retry-After and progressively delays without shortening that floor',async()=>{
-  expect([1,2,3,4,5,6,7,8,9].map(n=>mealRetryDelay(n))).toEqual([60,120,240,480,60,60,120,240,480]);
-  expect(mealRetryDelay(2,1200)).toBe(1200);expect(mealRetryDelay(9,70000)).toBe(70000);
-  vi.mocked(extractMeal).mockRejectedValue(new MealExtractionError('Model service HTTP 429',null,true,1200));
-  await run();expect(db.env.JOBS.send).toHaveBeenCalledWith({id:'meal'},{delaySeconds:1200});
-  expect(Date.parse(String(row().available_at))-Date.now()).toBe(1200000);
- });
- it('honors Retry-After beyond Queue’s 24-hour delay without spending an early attempt',async()=>{
-  // Use next week's source so the delay crosses midnight without expiring the menu.
-  db.sqlite.prepare("UPDATE jobs SET payload=? WHERE id='meal'").run(JSON.stringify({...payload,start:'2026-10-12',end:'2026-10-18'}));
-  vi.mocked(extractMeal).mockRejectedValue(new MealExtractionError('Rejected',null,true,100000));
-  await run();expect(Date.parse(String(row().available_at))-Date.now()).toBe(100000000);
-  expect(db.env.JOBS.send).toHaveBeenLastCalledWith({id:'meal'},{delaySeconds:86400});
-  vi.advanceTimersByTime(86400000);await run();expect(row().attempts).toBe(1);expect(extractMeal).toHaveBeenCalledTimes(1);
-  expect(db.env.JOBS.send).toHaveBeenLastCalledWith({id:'meal'},{delaySeconds:13600});
-  vi.advanceTimersByTime(13600000);await run();expect(row().attempts).toBe(2);expect(extractMeal).toHaveBeenCalledTimes(2);
- });
- it('never retries or falls back after ambiguous inference even when some cost is available',async()=>{
-  vi.mocked(extractMeal).mockRejectedValue(new MealExtractionError('Uncertain inference',0.04,false));
-  await run();expect(row().state).toBe('needs_review');expect(usage()).toMatchObject({actual_usd:0.04,state:'rejected'});
-  expect(db.env.JOBS.send).not.toHaveBeenCalled();await run();expect(extractMeal).toHaveBeenCalledTimes(1);
- });
- it('retries completed invalid output and accumulates observed costs through success in the same reservation',async()=>{
-  vi.mocked(extractMeal).mockRejectedValueOnce(new MealExtractionError('Completed invalid output',0.012,true))
-   .mockRejectedValueOnce(new MealExtractionError('Completed invalid dates',0.018,true))
-   .mockResolvedValueOnce({week,actualCost:0.025,model:MEAL_PRIMARY_MODEL});
-  await run();expect(usage()).toMatchObject({state:'safe_retry',actual_usd:0.012});vi.advanceTimersByTime(60000);
-  await run();expect(Number(usage().actual_usd)).toBeCloseTo(0.03);vi.advanceTimersByTime(120000);
-  await run();expect(row().state).toBe('done');expect(usage().state).toBe('completed');expect(Number(usage().actual_usd)).toBeCloseTo(0.055);
-  expect(db.sqlite.prepare('SELECT COUNT(*) AS n FROM llm_usage').get()!.n).toBe(1);
-  expect(db.sqlite.prepare('SELECT model FROM meals').get()!.model).toBe(MEAL_PRIMARY_MODEL);
- });
- it('preserves previously observed costs when a later successful response omits usage',async()=>{
-  vi.mocked(extractMeal).mockRejectedValueOnce(new MealExtractionError('Completed invalid output',0.012,true)).mockResolvedValueOnce({week,actualCost:null,model:MEAL_PRIMARY_MODEL});
-  await run();vi.advanceTimersByTime(60000);await run();expect(usage()).toMatchObject({state:'completed',actual_usd:0.012,reserved_usd:0.25});
- });
- it('resends an early redelivery after an uncertain delayed send without repeating inference or spending another attempt',async()=>{
-  vi.mocked(extractMeal).mockRejectedValue(new MealExtractionError('Rejected',null,true));
-  vi.mocked(db.env.JOBS.send).mockRejectedValueOnce(new Error('queue transport failure'));
-  const first=message();await expect(consume(db.env,{messages:[first],queue:'fixture'} as never)).rejects.toThrow('queue transport failure');
-  expect(first.ack).not.toHaveBeenCalled();expect(row().state).toBe('retry');expect(row().attempts).toBe(1);
-  await run();expect(extractMeal).toHaveBeenCalledTimes(1);expect(row().attempts).toBe(1);
-  expect(db.env.JOBS.send).toHaveBeenLastCalledWith({id:'meal'},{delaySeconds:60});
- });
- it('recovers a lost delayed message via Cron dispatch but treats a crashed running inference as uncertain',async()=>{
-  vi.mocked(extractMeal).mockRejectedValue(new MealExtractionError('Rejected',null,true));await run();
-  vi.mocked(db.env.JOBS.send).mockClear();vi.advanceTimersByTime(60000);await recover(db.env);await dispatch(db.env);
-  expect(db.env.JOBS.send).toHaveBeenCalledWith({id:'meal'});
-  await claim(db.env,'meal');vi.advanceTimersByTime(21*60000);await recover(db.env);
-  expect(row().state).toBe('needs_review');await run();expect(extractMeal).toHaveBeenCalledTimes(1);
- });
- it('keeps the snapshotted model pair across changed environment configuration',async()=>{
-  db.env.MEAL_MODEL='other/primary:free';db.env.MEAL_FALLBACK_MODEL='other/fallback:free';
-  vi.mocked(extractMeal).mockResolvedValue({week,actualCost:0,model:MEAL_FALLBACK_MODEL});
-  const job={...row(),attempts:6} as unknown as Job;await executeJob(db.env,job);
-  expect(vi.mocked(extractMeal).mock.calls[0][0].MEAL_MODEL).toBe(MEAL_FALLBACK_MODEL);
+ it('recovers expired running inference as uncertain without altering its reservation',async()=>{
+  db.sqlite.exec("INSERT INTO llm_usage(id,day,reserved_usd,state,created_at) VALUES('meal','2026-10-10',.25,'reserved','now')");
+  const reservation=db.sqlite.prepare('SELECT * FROM llm_usage').get();await claim(db.env,'meal');vi.advanceTimersByTime(21*60000);
+  await recover(db.env);await run();expect(row()).toMatchObject({state:'needs_review',attempts:1,error:'lease expired'});
+  expect(db.sqlite.prepare('SELECT * FROM llm_usage').get()).toEqual(reservation);
  });
 });
-
-describe('SQL retry and reservation boundaries',()=>{
- it('allows ten atomic meal claims but still stops other kinds at three',async()=>{
+describe('historical SQL claim boundaries',()=>{
+ it('retains ten-claim interpretation for legacy records while ordinary jobs still stop at three',async()=>{
   for(const kind of ['meal-extract','collect']){
    const id=`claims:${kind}`;await enqueue(db.env,id,kind,{});const max=kind==='meal-extract'?10:3;
-   for(let i=1;i<=max;i++){
-    const job=await claim(db.env,id);expect(job!.attempts).toBe(i);expect(await claim(db.env,id)).toBeNull();
-    await retryJob(db.env,job!,'rejected',1);vi.advanceTimersByTime(1000);
-   }
-   expect(await claim(db.env,id)).toBeNull();
-   expect(db.sqlite.prepare('SELECT state FROM jobs WHERE id=?').get(id)!.state).toBe(kind==='meal-extract'?'needs_review':'failed');
+   for(let i=1;i<=max;i++){const job=await claim(db.env,id);expect(job!.attempts).toBe(i);expect(await claim(db.env,id)).toBeNull();await retryJob(db.env,job!,'rejected',1);vi.advanceTimersByTime(1000);}
+   expect(await claim(db.env,id)).toBeNull();expect(db.sqlite.prepare('SELECT state FROM jobs WHERE id=?').get(id)!.state).toBe(kind==='meal-extract'?'needs_review':'failed');
   }
- });
- it('excludes only explicitly confirmed-rejected reservations while preserving records and unknown reservations',async()=>{
-  await reserveLlm(db.env,'released','2026-10-10');await reserveLlm(db.env,'unknown','2026-10-10');
-  db.sqlite.prepare("UPDATE llm_usage SET state='confirmed_rejected',reserved_usd=0 WHERE id='released'").run();
-  db.sqlite.prepare("UPDATE llm_usage SET state='rejected' WHERE id='unknown'").run();
-  expect(await reserveLlm(db.env,'fresh','2026-10-10')).toBe(true);
-  expect(await reserveLlm(db.env,'blocked','2026-10-10')).toBe(false);
-  expect(db.sqlite.prepare('SELECT COUNT(*) AS n FROM llm_usage').get()!.n).toBe(3);
-  expect(db.sqlite.prepare("SELECT state,reserved_usd,actual_usd FROM llm_usage WHERE id='unknown'").get()).toMatchObject({state:'rejected',reserved_usd:0.25,actual_usd:null});
-  expect(await reserveLlm(db.env,'released','2026-10-10')).toBe(false);
  });
 });

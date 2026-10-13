@@ -1,5 +1,6 @@
 import type { Env, Job, Notice } from './types';
-import { MEAL_MAX_ATTEMPTS } from './meals';
+// Preserve historical claim/recovery semantics without retaining an inference implementation.
+const MEAL_MAX_ATTEMPTS = 10;
 export const nowIso = () => new Date().toISOString();
 export async function enqueue(env:Env,id:string,kind:string,payload:unknown) {
  await env.DB.prepare('INSERT OR IGNORE INTO jobs(id,kind,payload,created_at,available_at) VALUES(?,?,?,?,?)').bind(id,kind,JSON.stringify(payload),nowIso(),nowIso()).run();
@@ -50,18 +51,4 @@ export async function deliveryIntent(env:Env,id:string,guild:string,channel:stri
  await env.DB.batch([
  env.DB.prepare('INSERT OR IGNORE INTO deliveries(id,guild_id,channel_id,content,created_at,updated_at,expires_at) VALUES(?,?,?,?,?,?,?)').bind(id,guild,channel,content,at,at,expiresAt),
  env.DB.prepare('INSERT OR IGNORE INTO jobs(id,kind,payload,created_at,available_at) VALUES(?,?,?,?,?)').bind(`send:${id}`,'deliver',JSON.stringify({deliveryId:id,...(mealDate?{mealDate}:{})}),at,at)]);
-}
-export async function reserveLlm(env:Env,id:string,day:string):Promise<boolean> {
- if(env.LLM_ENABLED!=='true'||!env.OPENROUTER_API_KEY) return false;
- const cap=Number(env.LLM_DAILY_BUDGET_USD??'0.50'); const calls=Number(env.LLM_DAILY_CALLS??'2'); const per=Number(env.LLM_MAX_CALL_USD??'0.25');
- if(!Number.isFinite(cap)||!Number.isFinite(per)||!Number.isInteger(calls)||cap<=0||per<=0||calls<=0) return false;
- // A delayed run keeps its original reservation, even if its retries cross KST midnight.
- const existing=await env.DB.prepare('SELECT state,reserved_usd,day FROM llm_usage WHERE id=?').bind(id).first<{state:string;reserved_usd:number;day:string}>();
- if(existing?.state==='safe_retry' && existing.reserved_usd>=per) {
- const reused=await env.DB.prepare("UPDATE llm_usage SET state='reserved' WHERE id=? AND state='safe_retry' AND (SELECT COALESCE(SUM(MAX(reserved_usd,COALESCE(actual_usd,0))),0) FROM llm_usage WHERE day=? AND state!='confirmed_rejected')<=? RETURNING id").bind(id,existing.day,cap).first();
- return !!reused;
- }
- // Unknown/failed usage retains its reservation. SQL serializes concurrent reservations.
- const r=await env.DB.prepare("INSERT OR IGNORE INTO llm_usage(id,day,reserved_usd,state,created_at) SELECT ?,?,?,'reserved',? WHERE (SELECT COUNT(*) FROM llm_usage WHERE day=? AND state!='confirmed_rejected')<? AND (SELECT COALESCE(SUM(MAX(reserved_usd,COALESCE(actual_usd,0))),0) FROM llm_usage WHERE day=? AND state!='confirmed_rejected') + ? <= ?").bind(id,day,per,nowIso(),day,calls,day,per,cap).run();
- return r.meta.changes===1;
 }
