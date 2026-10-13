@@ -124,7 +124,7 @@ describe('schedule delivery planning without LLM',()=>{
   db.env.DISCORD_TOKEN='fixture-only';fetch.mockResolvedValue(Response.json({id:'9001',channel_id:'1001'}));
   await consume(db.env,{messages:[{body:{id:'schedule-summary:111:1001:2026-10-20'},ack:vi.fn()}],queue:'fixture'} as never);
   expect(fetch).toHaveBeenCalledTimes(1);expect(fetch.mock.calls[0][1].method).toBe('POST');
-  expect(JSON.parse(fetch.mock.calls[0][1].body).content).toContain('D-day');
+  expect(JSON.stringify(JSON.parse(fetch.mock.calls[0][1].body).embeds)).toContain('D-day');
   expect(db.sqlite.prepare('SELECT state,updated_date FROM schedule_messages').get()).toMatchObject({state:'ready',updated_date:'2026-10-20'});
   expect(counts('llm_usage')).toBe(0);
  });

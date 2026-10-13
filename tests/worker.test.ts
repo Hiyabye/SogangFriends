@@ -25,9 +25,10 @@ describe('interaction and durable integration',()=>{
    expect(health.last_attempt).toBeTruthy();expect(health.last_success).toBeTruthy();expect(health.error).toBeNull();
    expect(db.sqlite.prepare("SELECT COUNT(*) AS n FROM jobs WHERE kind='collect'").get()!.n).toBe(6);
    expect(db.sqlite.prepare("SELECT COUNT(*) AS n FROM jobs WHERE kind='meal-discover'").get()!.n).toBe(1);
-   expect(db.env.JOBS.send).toHaveBeenCalledTimes(7);
+   expect(db.env.JOBS.send).toHaveBeenCalledTimes(9);
+   expect(db.sqlite.prepare("SELECT COUNT(*) AS n FROM jobs WHERE kind IN ('meal-refresh','schedule-refresh')").get()!.n).toBe(2);
    await worker.scheduled(event,db.env);
-   expect(db.sqlite.prepare('SELECT COUNT(*) AS n FROM jobs').get()!.n).toBe(7);
+   expect(db.sqlite.prepare('SELECT COUNT(*) AS n FROM jobs').get()!.n).toBe(9);
   } finally {db.close();}
  });
  it('discovers source metadata but never plans inference even with stale legacy settings',async()=>{

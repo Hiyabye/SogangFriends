@@ -1,9 +1,9 @@
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 import {testDatabase} from './helpers/db';
-import {consume,executeJob,mealReportResponse,planCron} from '../src/jobs';
+import {consume,mealReportResponse,planCron} from '../src/jobs';
+import {deliveryIntent} from '../src/storage';
 import {addDays} from '../src/time';
 import {fetchImage} from '../src/sources';
-import type {Job} from '../src/types';
 vi.mock('../src/sources',async original=>({...await original<object>(),fetchImage:vi.fn()}));
 let db:ReturnType<typeof testDatabase>;
 const source=(id:string)=>`https://scc.sogang.ac.kr/front/cmsboardview.do?bbsConfigFK=1185&siteId=dormitory&pkid=${id}`;
@@ -17,8 +17,10 @@ function seed(start='2026-10-12',id='941660',known=true){
  return week;
 }
 async function intent(slot='morning',date='2026-10-13'){
- await executeJob(db.env,{id:'report',kind:'meal-report',payload:JSON.stringify({date,mealSlot:slot})} as Job);
- return `meal-report:111:${date}:${slot}`;
+ const id=`meal-report:111:${date}:${slot}`;
+ // Previously queued delivery payloads retain their original no-replay semantics.
+ await deliveryIntent(db.env,id,'111','1001','legacy',slot==='morning'?`${date}T08:30:00.000Z`:`${date}T15:00:00.000Z`,date,slot as 'morning'|'evening');
+ return id;
 }
 async function send(id:string){const msg={body:{id:`send:${id}`},ack:vi.fn()};await consume(db.env,{messages:[msg]} as never);return msg;}
 beforeEach(()=>{

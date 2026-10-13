@@ -3,6 +3,8 @@ import { SOURCES, collectNotices, discoverMealSources, fetchImage } from './sour
 import { formatMeal, formatMealPart, type MealPeriod } from './meals';
 import { batchNotices, discordSend, allowedGuild, type DiscordMessageInput, type DiscordImageFile } from './discord';
 import { addDays, todayKst, validDate } from './time';
+import {boardHash,updateBoard} from './message-board';
+import {mealCard} from './meal-card';
 import { validateSchedules } from './schedule';
 import { updateScheduleSummary } from './schedule-summary';
 import { claim, deliveryIntent, dispatch, enqueue, nowIso, recover, retryJob, saveNotices, sourceFailure } from './storage';
@@ -39,17 +41,20 @@ export async function mealCommandResponse(env:Env,date:string):Promise<DiscordMe
  return {content:`${date} 식단 텍스트를 확인하지 못해 공식 주간 메뉴표를 이미지 파일로 첨부합니다 (${source.start} ~ ${source.end}).\n원문: <${source.url}>`,file:{filename:`bellarmino-${source.start}-${source.end}.${image.mime==='image/png'?'png':'jpg'}`,bytes:image.bytes,mime:image.mime}};
 }
 export type MealSlot='morning'|'evening';
+function usableMeal(day:MealWeek['days'][number]|undefined,period:MealPeriod):boolean {
+ return !!day&&(period==='dinner'?day.dinner.status!=='unknown':[day.breakfastKorean,day.breakfastWestern,day.breakfastCommon].some(offering=>offering.status!=='unknown'));
+}
 function reportExpiry(date:string,slot:MealSlot):string {
  return slot==='morning'?`${date}T08:30:00.000Z`:`${date}T15:00:00.000Z`;
 }
-export async function mealReportResponse(env:Env,date:string,slot:MealSlot,includeFiles=true):Promise<DiscordMessageInput> {
+export async function mealReportResponse(env:Env,date:string,slot:MealSlot,includeFiles=true,onImageFailure?:()=>void):Promise<DiscordMessageInput> {
  const targets:{date:string;period:MealPeriod;label:string}[]=slot==='morning'
   ?[{date,period:'breakfast',label:'오늘 아침'},{date,period:'dinner',label:'오늘 저녁'}]
   :[{date,period:'dinner',label:'오늘 저녁'},{date:addDays(date,1),period:'breakfast',label:'내일 아침'}];
  const parts:string[]=[],files:DiscordImageFile[]=[],downloaded=new Set<string>();let bytes=0;
  for(const target of targets){
   const cached=await retainedMeal(env,target.date),day=cached?.week.days.find(day=>day.date===target.date);
-  const usable=day&&(target.period==='dinner'?day.dinner.status!=='unknown':[day.breakfastKorean,day.breakfastWestern,day.breakfastCommon].some(offering=>offering.status!=='unknown'));
+  const usable=usableMeal(day,target.period);
   const source=!usable?await mealImageSource(env,target.date):null;
   const url=cached?.sourceUrl??source?.url??'https://scc.sogang.ac.kr/front/cmsboardlist.do?bbsConfigFK=1185&siteId=dormitory';
   let part=formatMealPart(cached?.week??null,target.date,url,target.period,target.label);
@@ -61,7 +66,7 @@ export async function mealReportResponse(env:Env,date:string,slot:MealSlot,inclu
      if(source.start>=window.start&&source.end<=window.end&&bytes+image.bytes.length<=5*1024*1024){
       files.push({filename:`bellarmino-${source.start}-${source.end}.${image.mime==='image/png'?'png':'jpg'}`,bytes:image.bytes,mime:image.mime});bytes+=image.bytes.length;
      }
-    }catch{/* Keep the exact dated section/link; no stale substitute or upstream details. */}
+    }catch{onImageFailure?.();/* Keep the exact dated section/link; no stale substitute or upstream details. */}
    }
    if(files.some(file=>file.filename.startsWith(`bellarmino-${source.start}-${source.end}.`)))part+='\n첨부: 해당 주 공식 메뉴표';
    else part+='\n이미지 첨부 불가 — 원문을 확인하세요.';
@@ -70,6 +75,24 @@ export async function mealReportResponse(env:Env,date:string,slot:MealSlot,inclu
  }
  const content=parts.join('\n\n')+'\nOCR 판독 결과로 메뉴명에 오탈자가 있을 수 있습니다. 미확인 항목은 원문을 확인하세요.';
  return files.length?{content,files}:content;
+}
+function activeMealSlot(time=new Date()):MealSlot|null {
+ const hhmm=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit',hour12:false}).format(time);
+ return hhmm<'07:00'?null:hhmm<'17:30'?'morning':'evening';
+}
+export async function updateMealBoard(env:Env,guild:string,channel:string,allowCreate=false):Promise<void>{
+ const date=todayKst(),slot=activeMealSlot();if(!slot)return;
+ const preview=mealCard(await mealReportResponse(env,date,slot,false));
+ const targets:[string,MealPeriod][]=slot==='morning'?[[date,'breakfast'],[date,'dinner']]:[[date,'dinner'],[addDays(date,1),'breakfast']],images=[];
+ for(const [target,period] of targets){
+  const cached=await retainedMeal(env,target),day=cached?.week.days.find(day=>day.date===target);
+  if(usableMeal(day,period))continue;
+  const source=await mealImageSource(env,target);
+  if(source)images.push({url:source.url,imageUrl:source.imageUrl,start:source.start,end:source.end});
+ }
+ const hash=await boardHash({preview,images});let complete=true;
+ await updateBoard(env,guild,channel,{table:'meal_messages',field:'meals_channel',date,key:`${date}:${slot==='morning'?0:1}`,hash,allowCreate,
+ valid:()=>activeMealSlot()===slot,complete:()=>complete,render:async()=>mealCard(await mealReportResponse(env,date,slot,true,()=>{complete=false;}))});
 }
 export async function planCron(env:Env,scheduledTime:number) {
  await pruneMealContent(env);
@@ -90,6 +113,9 @@ export async function planCron(env:Env,scheduledTime:number) {
  for(const [mealSlot,time] of [['morning','07:00'],['evening','17:30']] as const){
   if(mins(hhmm)>=mins(time)&&mins(hhmm)<mins(time)+15)await enqueue(env,`meal-report:${date}:${mealSlot}`,'meal-report',{date,mealSlot});
  }
+ const quarter=Math.floor(scheduledTime/(15*60_000));
+ await enqueue(env,`schedule-refresh:${quarter}`,'schedule-refresh',{date});
+ if(activeMealSlot(new Date(scheduledTime)))await enqueue(env,`meal-refresh:${quarter}`,'meal-refresh',{date});
  await dispatch(env);
 }
 async function recipients(env:Env,field:'notices_channel'|'meals_channel'|'schedule_channel') {
@@ -149,8 +175,22 @@ export async function executeJob(env:Env,job:Job) {
  }
  case 'meal-report': {
  if(payload.date!==todayKst()||!['morning','evening'].includes(payload.mealSlot)||nowIso()>=reportExpiry(payload.date,payload.mealSlot))break;
- const content=await mealReportResponse(env,payload.date,payload.mealSlot,false);
- for(const g of await recipients(env,'meals_channel'))await deliveryIntent(env,`meal-report:${g.id}:${payload.date}:${payload.mealSlot}`,g.id,g.channel,typeof content==='string'?content:content.content,reportExpiry(payload.date,payload.mealSlot),payload.date,payload.mealSlot);
+ if(activeMealSlot()!==payload.mealSlot)break;
+ const minute=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date());
+ const start=payload.mealSlot==='morning'?'07:00':'17:30',end=payload.mealSlot==='morning'?'07:15':'17:45';
+ for(const g of await recipients(env,'meals_channel'))await enqueue(env,`meal-board:${job.id}:${g.id}:${g.channel}`,'meal-board',{guild:g.id,channel:g.channel,date:payload.date,mealSlot:payload.mealSlot,allowCreate:minute>=start&&minute<end});
+ break;
+ }
+ case 'meal-refresh': {
+ if(payload.date!==todayKst())break;
+ for(const g of await recipients(env,'meals_channel'))await enqueue(env,`meal-board:${job.id}:${g.id}:${g.channel}`,'meal-board',{guild:g.id,channel:g.channel,date:payload.date,allowCreate:false});
+ break;
+ }
+ case 'meal-board': {
+ if(payload.date!==todayKst())break;
+ const minute=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date());
+ const window=payload.mealSlot==='morning'?minute>='07:00'&&minute<'07:15':payload.mealSlot==='evening'?minute>='17:30'&&minute<'17:45':false;
+ await updateMealBoard(env,payload.guild,payload.channel,payload.allowCreate===true&&window&&activeMealSlot()===payload.mealSlot);
  break;
  }
  case 'meal-daily': {
@@ -159,14 +199,15 @@ export async function executeJob(env:Env,job:Job) {
  for(const g of await recipients(env,'meals_channel')) await deliveryIntent(env,`meal:${g.id}:${payload.date}`,g.id,g.channel,content,new Date(`${payload.date}T15:00:00Z`).toISOString(),payload.date);
  break;
  }
+ case 'schedule-refresh':
  case 'schedule-daily': {
  if(payload.date!==todayKst()) break;
- for(const g of await recipients(env,'schedule_channel')) await enqueue(env,`schedule-summary:${g.id}:${g.channel}:${payload.date}`,'schedule-summary',{guild:g.id,channel:g.channel,date:payload.date});
+ for(const g of await recipients(env,'schedule_channel')) await enqueue(env,`schedule-summary:${g.id}:${g.channel}:${payload.date}${job.kind==='schedule-daily'?'':`:${job.id}`}`,'schedule-summary',{guild:g.id,channel:g.channel,date:payload.date,allowCreate:job.kind==='schedule-daily'});
  break;
  }
  case 'schedule-summary': {
  if(payload.date!==todayKst())break;
- await updateScheduleSummary(env,payload.guild,payload.channel,payload.date,await getSchedules(env));
+ await updateScheduleSummary(env,payload.guild,payload.channel,payload.date,await getSchedules(env),payload.allowCreate!==false);
  break;
  }
  case 'deliver': {

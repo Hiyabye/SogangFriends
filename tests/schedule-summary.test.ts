@@ -18,23 +18,23 @@ afterEach(() => { db.close(); vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.us
 
 describe('all-future schedule summary', () => {
  it('includes D-day, ongoing explicit deadlines, and dates beyond 30 days; excludes unapproved/faculty/past', () => {
-  const output = scheduleSummary([
+  const output = JSON.stringify(scheduleSummary([
    entry({id:'today',startDate:'2026-10-11',endDate:undefined,type:'event'}),
    entry({id:'ongoing',startDate:'2026-10-01',deadlineDate:'2026-10-20'}),
    entry({id:'far',title:'먼 일정',startDate:'2027-02-18',endDate:undefined,type:'event'}),
    entry({id:'inactive',title:'승인 전',active:false}), entry({id:'faculty',title:'교직원',note:'교직원 대상'}),
    entry({id:'past',title:'지난 일정',startDate:'2026-10-01',endDate:'2026-10-10'}),
-  ], '2026-10-11');
+  ], '2026-10-11'));
   expect(output).toContain('D-day'); expect(output).toContain('진행 중 · 마감 D-9'); expect(output).toContain('먼 일정');
   expect(output).not.toContain('승인 전'); expect(output).not.toContain('교직원'); expect(output).not.toContain('지난 일정');
   expect(output).toContain('2026-10-11 KST');
  });
  it('does not invent a deadline from a period end date', () => {
-  expect(scheduleSummary([entry({startDate:'2026-10-01'})],'2026-10-11')).toContain('진행 중 |');
-  expect(scheduleSummary([entry({startDate:'2026-10-01'})],'2026-10-11')).not.toContain('마감 D-');
+  expect(JSON.stringify(scheduleSummary([entry({startDate:'2026-10-01'})],'2026-10-11'))).toContain('진행 중');
+  expect(JSON.stringify(scheduleSummary([entry({startDate:'2026-10-01'})],'2026-10-11'))).not.toContain('마감 D-');
  });
  it('has a clear empty state and rejects invalid dates', () => {
-  expect(scheduleSummary([], '2026-10-11')).toContain('앞으로의 승인된 학사일정이 없습니다.');
+  expect(JSON.stringify(scheduleSummary([], '2026-10-11'))).toContain('앞으로의 승인된 학사일정이 없습니다.');
   expect(() => scheduleSummary([], '2026-02-30')).toThrow('Invalid summary date');
  });
  it('attaches the entire output instead of truncating or splitting into multiple posts', () => {
@@ -61,7 +61,7 @@ describe('tracked editable summary', () => {
  it('overlapping initial jobs never perform two POSTs', async () => {
   let finish!: (response:Response) => void;
   const fetch = vi.fn(() => new Promise<Response>(resolve => {finish=resolve;})); vi.stubGlobal('fetch',fetch);
-  const first = run(); for(let i=0;i<20&&!finish;i++) await Promise.resolve();
+  const first = run(); await vi.waitFor(()=>expect(finish).toBeTypeOf('function'));
   await expect(run()).rejects.toBeInstanceOf(ScheduleSummaryRetry);
   expect(fetch).toHaveBeenCalledTimes(1); finish(sent()); await first;
  });

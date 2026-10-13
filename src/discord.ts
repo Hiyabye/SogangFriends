@@ -68,7 +68,11 @@ function truncate(content: string, limit: number): string {
   return output + '…';
 }
 
-export interface DiscordImageEmbed { title: string; url: string; image: { url: string } }
+export interface DiscordImageEmbed {
+ title?:string;url?:string;description?:string;color?:number;
+ fields?:{name:string;value:string;inline?:boolean}[];
+ footer?:{text:string};image?:{url:string};
+}
 export interface DiscordImageFile { filename: string; bytes: Uint8Array; mime: string }
 export type DiscordMessageInput = string | { content: string; embeds?: DiscordImageEmbed[]; file?: DiscordImageFile; files?: DiscordImageFile[] };
 export function message(input: DiscordMessageInput): { content: string; allowed_mentions: { parse: never[] }; embeds?: DiscordImageEmbed[]; attachments?: {id:number;filename:string}[] } {
