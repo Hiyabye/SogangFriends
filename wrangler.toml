@@ -7,14 +7,14 @@ workers_dev = true
 crons = ["*/15 * * * *"]
 
 [vars]
-DISCORD_APPLICATION_ID = "REPLACE_APPLICATION_ID"
-DISCORD_PUBLIC_KEY = "REPLACE_PUBLIC_KEY"
-ALLOWED_GUILDS = "REPLACE_GUILD_ID"
+DISCORD_APPLICATION_ID = "1558118082914943086"
+DISCORD_PUBLIC_KEY = "f436edec4bca28b9491464c4b84525f1596d5f37d73394aad5c3043f965414c4"
+ALLOWED_GUILDS = "1558118900347183374"
 SOURCE_INTERVAL_HOURS = "6"
 # Six-board Node collector supplies authenticated snapshots; Worker Cron remains for meals/schedules.
 NOTICE_COLLECTION_MODE = "external"
 # Apply D1 archive migrations 0003 + 0004 before separately approved activation.
-NOTICE_ARCHIVE_ENABLED = "false"
+NOTICE_ARCHIVE_ENABLED = "true"
 MEAL_TIME_KST = "07:30"
 # Only :free models with verified zero pricing are permitted.
 MEAL_MODEL = "google/gemma-4-31b-it:free"
@@ -28,12 +28,12 @@ LLM_MAX_CALL_USD = "0.25"
 [[d1_databases]]
 binding = "DB"
 database_name = "sogang-friends"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "6fc1eae2-2847-478c-9b7a-21a6d6a6d8c5"
 migrations_dir = "migrations"
 
 [[queues.producers]]
-binding = "JOBS"
 queue = "sogang-jobs"
+binding = "JOBS"
 
 [[queues.consumers]]
 queue = "sogang-jobs"
