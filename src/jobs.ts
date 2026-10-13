@@ -151,7 +151,7 @@ export async function executeJob(env:Env,job:Job) {
  case 'meal-daily': {
  if(payload.date!==todayKst()) break;
  const content=await mealResponse(env,payload.date);
- for(const g of await recipients(env,'meals_channel')) await deliveryIntent(env,`meal:${g.id}:${payload.date}`,g.id,g.channel,content,new Date(`${payload.date}T15:00:00Z`).toISOString());
+ for(const g of await recipients(env,'meals_channel')) await deliveryIntent(env,`meal:${g.id}:${payload.date}`,g.id,g.channel,content,new Date(`${payload.date}T15:00:00Z`).toISOString(),payload.date);
  break;
  }
  case 'schedule-daily': {
@@ -166,10 +166,15 @@ export async function executeJob(env:Env,job:Job) {
  }
  case 'deliver': {
  await env.DB.prepare("UPDATE deliveries SET state='expired',updated_at=? WHERE id=? AND state IN ('pending','retry') AND expires_at<=?").bind(nowIso(),payload.deliveryId,nowIso()).run();
- const row=await env.DB.prepare("UPDATE deliveries SET state='sending',updated_at=? WHERE id=? AND state IN ('pending','retry') RETURNING *").bind(nowIso(),payload.deliveryId).first<{guild_id:string;channel_id:string;content:string}>();
+ const row=await env.DB.prepare("UPDATE deliveries SET state='sending',updated_at=? WHERE id=? AND state IN ('pending','retry') RETURNING *").bind(nowIso(),payload.deliveryId).first<{guild_id:string;channel_id:string;content:string;expires_at:string}>();
  if(!row) break;
  if(!allowedGuild(row.guild_id,env)){await env.DB.prepare("UPDATE deliveries SET state='failed',error='guild disabled' WHERE id=?").bind(payload.deliveryId).run();break;}
- const result=await discordSend(env,row.channel_id,row.content);
+ // Keep file bytes transient; only the meal date belongs in the durable intent.
+ const content=payload.mealDate?await mealCommandResponse(env,payload.mealDate):row.content;
+ if(row.expires_at<=nowIso()||(payload.mealDate&&payload.mealDate!==todayKst())){
+ await env.DB.prepare("UPDATE deliveries SET state='expired',updated_at=? WHERE id=? AND state='sending'").bind(nowIso(),payload.deliveryId).run();break;
+ }
+ const result=await discordSend(env,row.channel_id,content);
  await env.DB.prepare('UPDATE deliveries SET state=?,message_id=?,updated_at=?,error=? WHERE id=?').bind(result.state,result.messageId??null,nowIso(),result.state==='sent'?null:result.state,payload.deliveryId).run();
  if(result.state==='retry') {const error=new Error('Discord rate limited') as Error&{retryAfter:number};error.retryAfter=result.retryAfter??60;throw error;}
  break;

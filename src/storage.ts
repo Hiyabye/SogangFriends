@@ -45,11 +45,11 @@ export async function saveNotices(env:Env,source:string,rows:Notice[],at:string)
 export async function sourceFailure(env:Env,source:string) {
  await env.DB.prepare("INSERT INTO sources(id,last_attempt,error) VALUES(?,?,'source collection failed') ON CONFLICT(id) DO UPDATE SET last_attempt=excluded.last_attempt,error=excluded.error").bind(source,nowIso()).run();
 }
-export async function deliveryIntent(env:Env,id:string,guild:string,channel:string,content:string,expiresAt=new Date(Date.now()+86400_000).toISOString()) {
+export async function deliveryIntent(env:Env,id:string,guild:string,channel:string,content:string,expiresAt=new Date(Date.now()+86400_000).toISOString(),mealDate?:string) {
  const at=nowIso();
  await env.DB.batch([
  env.DB.prepare('INSERT OR IGNORE INTO deliveries(id,guild_id,channel_id,content,created_at,updated_at,expires_at) VALUES(?,?,?,?,?,?,?)').bind(id,guild,channel,content,at,at,expiresAt),
- env.DB.prepare('INSERT OR IGNORE INTO jobs(id,kind,payload,created_at,available_at) VALUES(?,?,?,?,?)').bind(`send:${id}`,'deliver',JSON.stringify({deliveryId:id}),at,at)]);
+ env.DB.prepare('INSERT OR IGNORE INTO jobs(id,kind,payload,created_at,available_at) VALUES(?,?,?,?,?)').bind(`send:${id}`,'deliver',JSON.stringify({deliveryId:id,...(mealDate?{mealDate}:{})}),at,at)]);
 }
 export async function reserveLlm(env:Env,id:string,day:string):Promise<boolean> {
  if(env.LLM_ENABLED!=='true'||!env.OPENROUTER_API_KEY) return false;

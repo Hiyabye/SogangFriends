@@ -101,13 +101,24 @@ export function batchNotices(notices: Notice[]): string[] {
 
 export interface SendResult { state: 'sent' | 'uncertain' | 'retry' | 'failed'; messageId?: string; retryAfter?: number }
 
-export async function discordSend(env: Pick<Env, 'DISCORD_TOKEN'>, channel: string, content: string): Promise<SendResult> {
+export async function discordSend(env: Pick<Env, 'DISCORD_TOKEN'>, channel: string, content: DiscordMessageInput): Promise<SendResult> {
   if (!env.DISCORD_TOKEN || !/^\d+$/.test(channel)) return { state: 'failed' };
+  const headers: Record<string,string> = { Authorization: `Bot ${env.DISCORD_TOKEN}` };
+  let body: string | FormData;
+  if (typeof content !== 'string' && content.file) {
+    const form = new FormData();
+    form.append('payload_json', JSON.stringify(message(content)));
+    form.append('files[0]', new Blob([Uint8Array.from(content.file.bytes).buffer], {type:content.file.mime}), content.file.filename);
+    body = form;
+  } else {
+    headers['Content-Type'] = 'application/json';
+    body = JSON.stringify(message(content));
+  }
   let response: Response;
   try {
     response = await fetch(`${API}/channels/${channel}/messages`, {
-      method: 'POST', headers: { Authorization: `Bot ${env.DISCORD_TOKEN}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(message(content)), signal: AbortSignal.timeout(15000),
+      method: 'POST', headers,
+      body, signal: AbortSignal.timeout(15000),
     });
   } catch { return { state: 'uncertain' }; }
   if (response.status === 429) {
