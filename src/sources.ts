@@ -114,10 +114,38 @@ export function parseMealList(input:string):{url:string;published:string;start:s
  }
  if(!result.length)throw new Error('No recognizable meal articles');return result;
 }
+const MAX_MEAL_IMAGE_BYTES=5*1024*1024;
+const MAX_INLINE_BASE64_LENGTH=4*Math.ceil(MAX_MEAL_IMAGE_BYTES/3);
+function mealArticleUrl(url:string):boolean {return /^https:\/\/scc\.sogang\.ac\.kr\/front\/cmsboardview\.do\?bbsConfigFK=1185&siteId=dormitory&pkid=[1-9]\d*$/.test(url);}
+function mealArticleDocument(input:string,url:string):Node {
+ if(!mealArticleUrl(url))throw new Error('Disallowed meal article');
+ const doc=parse(input);cmsIdentity(doc);const ids=all(doc,n=>tag(n,'input')&&attr(n,'name')==='pkid');
+ if(!ids.length||ids.some(n=>attr(n,'value')!==new URL(url).searchParams.get('pkid')))throw new Error('Wrong meal post');
+ return doc;
+}
+function mealImageReference(doc:Node):string {return attr(one(one(doc,n=>cls(n,'post_cont')),n=>tag(n,'img')),'src');}
+function inlineMealPng(reference:string):Uint8Array {
+ const prefix='data:image/png;base64,';
+ if(!reference.startsWith(prefix))throw new Error('Invalid inline meal image');
+ const encoded=reference.slice(prefix.length);
+ if(!encoded.length||encoded.length>MAX_INLINE_BASE64_LENGTH||encoded.length%4!==0||!/^[A-Za-z0-9+/]*={0,2}$/.test(encoded))throw new Error('Invalid inline meal base64');
+ let decoded:string;try{decoded=atob(encoded);}catch{throw new Error('Invalid inline meal base64');}
+ if(decoded.length>MAX_MEAL_IMAGE_BYTES||btoa(decoded)!==encoded)throw new Error('Invalid inline meal base64');
+ const bytes=Uint8Array.from(decoded,c=>c.charCodeAt(0));
+ if(bytes.length<33||![137,80,78,71,13,10,26,10].every((v,i)=>bytes[i]===v))throw new Error('Invalid inline meal PNG');
+ const header=new DataView(bytes.buffer);
+ if(header.getUint32(8)!==13||![73,72,68,82].every((v,i)=>bytes[12+i]===v))throw new Error('Invalid inline meal PNG');
+ const width=header.getUint32(16),height=header.getUint32(20);
+ if(!width||!height||width*height>20_000_000)throw new Error('Invalid inline meal dimensions');
+ return bytes;
+}
 export function parseMealImage(input:string,article:{url:string;start:string;end:string;published:string}):string {
- const doc=parse(input);cmsIdentity(doc);const ids=all(doc,n=>tag(n,'input')&&attr(n,'name')==='pkid');if(!ids.length||ids.some(n=>attr(n,'value')!==new URL(article.url).searchParams.get('pkid')))throw new Error('Wrong meal post');
+ const doc=mealArticleDocument(input,article.url);
  const info=one(doc,n=>cls(n,'post_info'));const period=mealPeriod(text(one(info,n=>cls(n,'title'))),article.published);if(period.start!==article.start||period.end!==article.end)throw new Error('Changed meal title');
- const image=one(one(doc,n=>cls(n,'post_cont')),n=>tag(n,'img'));const u=new URL(attr(image,'src'),article.url);if(u.protocol==='http:'&&u.hostname==='scc.sogang.ac.kr')u.protocol='https:';validateImageUrl(u.href);return u.href;
+ const reference=mealImageReference(doc);
+ // Persist only the official article identity; inline image bytes remain transient.
+ if(reference.startsWith('data:')){inlineMealPng(reference);return article.url;}
+ const u=new URL(reference,article.url);if(u.protocol==='http:'&&u.hostname==='scc.sogang.ac.kr')u.protocol='https:';validateImageUrl(u.href);return u.href;
 }
 function validateImageUrl(url:string):void {const u=new URL(url);if(u.origin!=='https://scc.sogang.ac.kr'||!/^\/dataview\/board\/1185\/[^/]+\.(?:png|jpe?g)$/i.test(u.pathname)||u.search||u.hash||u.username||u.password)throw new Error('Disallowed meal image');}
 async function mealCandidates(today:string,includeUpcoming=false):Promise<Omit<MealSource,'imageUrl'>[]> {
@@ -144,7 +172,17 @@ export async function discoverMealSources():Promise<MealSource[]> {
  return result;
 }
 export async function fetchImage(url:string):Promise<{bytes:Uint8Array;mime:string;hash:string}> {
- validateImageUrl(url);const r=await sourceBytes(url,5*1024*1024);const b=r.bytes;const png=b.length>=8&&[137,80,78,71,13,10,26,10].every((v,i)=>b[i]===v);const jpeg=b.length>=4&&b[0]===255&&b[1]===216&&b[2]===255;
- const mime=png?'image/png':jpeg?'image/jpeg':null;if(!mime||!r.type.toLowerCase().startsWith(mime))throw new Error('Invalid image format');
+ let b:Uint8Array,mime:string|null;
+ if(mealArticleUrl(url)){
+  // Base64 is larger than its decoded PNG; bound the complete article before parsing.
+  const r=await sourceBytes(url,MAX_INLINE_BASE64_LENGTH+256*1024);
+  if(!r.type.includes('text/html'))throw new Error('Expected source HTML');
+  const doc=mealArticleDocument(new TextDecoder().decode(r.bytes),url);
+  b=inlineMealPng(mealImageReference(doc));mime='image/png';
+ }else{
+  validateImageUrl(url);const r=await sourceBytes(url,MAX_MEAL_IMAGE_BYTES);b=r.bytes;
+  const png=b.length>=8&&[137,80,78,71,13,10,26,10].every((v,i)=>b[i]===v);const jpeg=b.length>=4&&b[0]===255&&b[1]===216&&b[2]===255;
+  mime=png?'image/png':jpeg?'image/jpeg':null;if(!mime||!r.type.toLowerCase().startsWith(mime))throw new Error('Invalid image format');
+ }
  const hash=[...new Uint8Array(await crypto.subtle.digest('SHA-256',Uint8Array.from(b).buffer))].map(v=>v.toString(16).padStart(2,'0')).join('');return {bytes:b,mime,hash};
 }

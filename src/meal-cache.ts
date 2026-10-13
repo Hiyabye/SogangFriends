@@ -11,7 +11,9 @@ export function mealWindow(today=todayKst()):{start:string;end:string} {
 function validateSource(source:MealSource):void {
  if(!validDate(source.start)||!validDate(source.end)||!validDate(source.published)||dayDifference(source.start,source.end)!==6||new Date(`${source.start}T00:00:00Z`).getUTCDay()!==1||Math.abs(dayDifference(source.start,source.published))>45)throw new Error('Invalid meal source period');
  const article=new URL(source.url),image=new URL(source.imageUrl);
- if(source.url!==`https://scc.sogang.ac.kr/front/cmsboardview.do?bbsConfigFK=1185&siteId=dormitory&pkid=${article.searchParams.get('pkid')}`||! /^[1-9]\d*$/.test(article.searchParams.get('pkid')??'')||image.origin!=='https://scc.sogang.ac.kr'||!/^\/dataview\/board\/1185\/[^/]+\.(?:png|jpe?g)$/i.test(image.pathname)||image.search||image.hash||image.username||image.password)throw new Error('Invalid meal source URL');
+ const remoteImage=image.origin==='https://scc.sogang.ac.kr'&&/^\/dataview\/board\/1185\/[^/]+\.(?:png|jpe?g)$/i.test(image.pathname)&&!image.search&&!image.hash&&!image.username&&!image.password;
+ // Inline menu captures use their exact official article URL, never a persisted data URL.
+ if(source.url!==`https://scc.sogang.ac.kr/front/cmsboardview.do?bbsConfigFK=1185&siteId=dormitory&pkid=${article.searchParams.get('pkid')}`||! /^[1-9]\d*$/.test(article.searchParams.get('pkid')??'')||!(source.imageUrl===source.url||remoteImage))throw new Error('Invalid meal source URL');
 }
 export async function pruneMealContent(env:Env,today=todayKst()):Promise<void> {
  const window=mealWindow(today);

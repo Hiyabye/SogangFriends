@@ -1,0 +1,600 @@
+[
+  {
+    "source": {
+      "url": "https://scc.sogang.ac.kr/front/cmsboardview.do?bbsConfigFK=1185&siteId=dormitory&pkid=941444",
+      "imageUrl": "https://scc.sogang.ac.kr/dataview/board/1185/20260930_1516_3210001.jpg",
+      "published": "2026-09-30",
+      "start": "2026-10-05",
+      "end": "2026-10-11"
+    },
+    "imageHash": "05c38bb91374f5d910ac108daee6f94bd7564424761f55a19f06f9ca2ca0104c",
+    "accepted": true,
+    "engine": "paddle",
+    "identity": {
+      "banner": [
+        "주간메뉴표",
+        "2026.10.05~10.11"
+      ],
+      "headers": [
+        [
+          "10월",
+          "05일",
+          "월요일"
+        ],
+        [
+          "10월",
+          "06일",
+          "화요일"
+        ],
+        [
+          "10월",
+          "07일",
+          "수요일"
+        ],
+        [
+          "10월",
+          "08일",
+          "목요일"
+        ],
+        [
+          "10월",
+          "09일",
+          "금요일"
+        ],
+        [
+          "10월",
+          "10일",
+          "토요",
+          "일"
+        ],
+        [
+          "10월",
+          "11일",
+          "일요일"
+        ]
+      ]
+    },
+    "geometry": {
+      "imageSize": [
+        3508,
+        2480
+      ],
+      "horizontalRules": [
+        314,
+        433,
+        942,
+        1007,
+        1387,
+        1452,
+        1516,
+        1654,
+        2120,
+        2185,
+        2250
+      ],
+      "dayBoundaries": [
+        451,
+        844,
+        1244,
+        1636,
+        2041,
+        2426,
+        2869,
+        3302
+      ],
+      "unknownCells": {
+        "breakfast_western": [],
+        "cup_rice": [],
+        "dinner": []
+      }
+    },
+    "attempts": [
+      {
+        "engine": "paddle",
+        "accepted": true,
+        "reason": null,
+        "elapsedSeconds": 47.8800685
+      }
+    ]
+  },
+  {
+    "source": {
+      "url": "https://scc.sogang.ac.kr/front/cmsboardview.do?bbsConfigFK=1185&siteId=dormitory&pkid=940929",
+      "imageUrl": "https://scc.sogang.ac.kr/dataview/board/1185/20260916_1446_3610001.jpg",
+      "published": "2026-09-16",
+      "start": "2026-09-21",
+      "end": "2026-09-27"
+    },
+    "imageHash": "bb8bb03016b986653825bc7ccd4b7a10bf7b38c5efc027cc7f351254c6a8fc5a",
+    "accepted": true,
+    "engine": "paddle",
+    "identity": {
+      "banner": [
+        "주간메뉴표",
+        "2026.09.21~2026.09.27"
+      ],
+      "headers": [
+        [
+          "09월",
+          "21일",
+          "월요일"
+        ],
+        [
+          "09월",
+          "22일",
+          "화요일"
+        ],
+        [
+          "09월",
+          "23일",
+          "수요일"
+        ],
+        [
+          "09월",
+          "24일",
+          "목요일"
+        ],
+        [
+          "09월",
+          "25",
+          "금요일"
+        ],
+        [
+          "09월",
+          "26일",
+          "토요일"
+        ],
+        [
+          "09월",
+          "27일",
+          "일요일"
+        ]
+      ]
+    },
+    "geometry": {
+      "imageSize": [
+        3508,
+        2480
+      ],
+      "horizontalRules": [
+        314,
+        433,
+        942,
+        1006,
+        1387,
+        1452,
+        1516,
+        1686,
+        2131,
+        2196,
+        2261
+      ],
+      "dayBoundaries": [
+        416,
+        809,
+        1209,
+        1600,
+        2006,
+        2461,
+        2904,
+        3338
+      ],
+      "unknownCells": {
+        "breakfast_western": [],
+        "cup_rice": [],
+        "dinner": []
+      }
+    },
+    "attempts": [
+      {
+        "engine": "paddle",
+        "accepted": true,
+        "reason": null,
+        "elapsedSeconds": 35.780510625000005
+      }
+    ]
+  },
+  {
+    "source": {
+      "url": "https://scc.sogang.ac.kr/front/cmsboardview.do?bbsConfigFK=1185&siteId=dormitory&pkid=940528",
+      "imageUrl": "https://scc.sogang.ac.kr/dataview/board/1185/20260908_1630_4210001.jpg",
+      "published": "2026-09-08",
+      "start": "2026-09-14",
+      "end": "2026-09-20"
+    },
+    "imageHash": "31a745b1e1e63efb0dbfe491313ed163738f3c9021bee4d4cdad3dcc74cb8da0",
+    "accepted": false,
+    "reason": "both_engines_rejected",
+    "attempts": [
+      {
+        "engine": "paddle",
+        "reason": "conflicting_banner_dates",
+        "elapsedSeconds": 5.062240333000005
+      },
+      {
+        "engine": "easy",
+        "reason": "conflicting_banner_dates",
+        "elapsedSeconds": 4.54266075000001
+      }
+    ]
+  },
+  {
+    "source": {
+      "url": "https://scc.sogang.ac.kr/front/cmsboardview.do?bbsConfigFK=1185&siteId=dormitory&pkid=940139",
+      "imageUrl": "https://scc.sogang.ac.kr/dataview/board/1185/20260901_1559_4510001.jpg",
+      "published": "2026-09-01",
+      "start": "2026-09-07",
+      "end": "2026-09-13"
+    },
+    "imageHash": "eefa06624712f6e245c85c6293f8ce99d78351fd46bf05cbe8d7d40c450d2d27",
+    "accepted": true,
+    "engine": "paddle",
+    "identity": {
+      "banner": [
+        "주간메뉴표",
+        "2026.09.07~2026.09.13"
+      ],
+      "headers": [
+        [
+          "09월",
+          "07일",
+          "월요일"
+        ],
+        [
+          "09월",
+          "08일",
+          "화요일"
+        ],
+        [
+          "09월",
+          "09일",
+          "수요일"
+        ],
+        [
+          "09월",
+          "10일",
+          "목요일"
+        ],
+        [
+          "09월",
+          "11일",
+          "금요일"
+        ],
+        [
+          "09월",
+          "12일",
+          "토요일"
+        ],
+        [
+          "09월",
+          "13일",
+          "일요일"
+        ]
+      ]
+    },
+    "geometry": {
+      "imageSize": [
+        3508,
+        2480
+      ],
+      "horizontalRules": [
+        314,
+        433,
+        942,
+        1006,
+        1387,
+        1452,
+        1516,
+        1686,
+        2131,
+        2196,
+        2261
+      ],
+      "dayBoundaries": [
+        441,
+        834,
+        1234,
+        1625,
+        2031,
+        2436,
+        2879,
+        3312
+      ],
+      "unknownCells": {
+        "breakfast_western": [],
+        "cup_rice": [],
+        "dinner": []
+      }
+    },
+    "attempts": [
+      {
+        "engine": "paddle",
+        "accepted": true,
+        "reason": null,
+        "elapsedSeconds": 38.979409875
+      }
+    ]
+  },
+  {
+    "source": {
+      "url": "https://scc.sogang.ac.kr/front/cmsboardview.do?bbsConfigFK=1185&siteId=dormitory&pkid=941205",
+      "imageUrl": "https://scc.sogang.ac.kr/front/cmsboardview.do?bbsConfigFK=1185&siteId=dormitory&pkid=941205",
+      "published": "2026-09-22",
+      "start": "2026-09-28",
+      "end": "2026-10-04"
+    },
+    "imageHash": "466206c8279322d0cd282fd228803fc81df5545e43fba81faf0eaf3f884d60df",
+    "accepted": true,
+    "engine": "paddle",
+    "identity": {
+      "banner": [
+        "주간메뉴표",
+        "2026.09,28~ 10.04"
+      ],
+      "headers": [
+        [
+          "09월",
+          "28일",
+          "월요일"
+        ],
+        [
+          "09월 29일",
+          "화요일"
+        ],
+        [
+          "09월 30일",
+          "수요일"
+        ],
+        [
+          "10월 01일",
+          "목요일"
+        ],
+        [
+          "10월 02일",
+          "금요일"
+        ],
+        [
+          "10월 03일",
+          "토요일"
+        ],
+        [
+          "10월 04일",
+          "일요일"
+        ]
+      ]
+    },
+    "geometry": {
+      "imageSize": [
+        1071,
+        764
+      ],
+      "horizontalRules": [
+        89,
+        127,
+        290,
+        311,
+        432,
+        453,
+        474,
+        528,
+        670,
+        691,
+        712
+      ],
+      "dayBoundaries": [
+        120,
+        246,
+        374,
+        499,
+        628,
+        752,
+        893,
+        1032
+      ],
+      "unknownCells": {
+        "breakfast_western": [],
+        "cup_rice": [],
+        "dinner": []
+      }
+    },
+    "attempts": [
+      {
+        "engine": "paddle",
+        "accepted": true,
+        "reason": null,
+        "elapsedSeconds": 19.41759562500002
+      }
+    ]
+  },
+  {
+    "source": {
+      "url": "https://scc.sogang.ac.kr/front/cmsboardview.do?bbsConfigFK=1185&siteId=dormitory&pkid=939460",
+      "imageUrl": "https://scc.sogang.ac.kr/front/cmsboardview.do?bbsConfigFK=1185&siteId=dormitory&pkid=939460",
+      "published": "2026-08-18",
+      "start": "2026-08-31",
+      "end": "2026-09-06"
+    },
+    "imageHash": "2c78d3e2d06142e2aac5163b85a720731ceb46ed9365e94ef5eb319a68db3e44",
+    "accepted": true,
+    "engine": "paddle",
+    "identity": {
+      "banner": [
+        "주간메뉴표",
+        "2026.08.31~09.06"
+      ],
+      "headers": [
+        [
+          "08월31일",
+          "월요일"
+        ],
+        [
+          "09월 01일",
+          "화요일"
+        ],
+        [
+          "09월",
+          "02일",
+          "수요일"
+        ],
+        [
+          "09월03일",
+          "목요일"
+        ],
+        [
+          "09월 04일",
+          "금요일"
+        ],
+        [
+          "09월 05일",
+          "토요일"
+        ],
+        [
+          "09월",
+          "06일",
+          "일요일"
+        ]
+      ]
+    },
+    "geometry": {
+      "imageSize": [
+        1099,
+        767
+      ],
+      "horizontalRules": [
+        88,
+        126,
+        289,
+        310,
+        431,
+        452,
+        473,
+        527,
+        669,
+        690,
+        711
+      ],
+      "dayBoundaries": [
+        131,
+        256,
+        385,
+        510,
+        639,
+        769,
+        911,
+        1049
+      ],
+      "unknownCells": {
+        "breakfast_western": [],
+        "cup_rice": [],
+        "dinner": []
+      }
+    },
+    "attempts": [
+      {
+        "engine": "paddle",
+        "accepted": true,
+        "reason": null,
+        "elapsedSeconds": 19.922728750000005
+      }
+    ]
+  },
+  {
+    "source": {
+      "url": "https://scc.sogang.ac.kr/front/cmsboardview.do?bbsConfigFK=1185&siteId=dormitory&pkid=941660",
+      "imageUrl": "https://scc.sogang.ac.kr/dataview/board/1185/20261008_0923_5910001.jpg",
+      "published": "2026-10-08",
+      "start": "2026-10-12",
+      "end": "2026-10-18"
+    },
+    "imageHash": "f8f5a60905a10f308495422d6ed5b7629f53f6e1a30594f46d386a05a36b0ff4",
+    "accepted": true,
+    "engine": "easy",
+    "identity": {
+      "banner": [
+        "주간메 뉴표",
+        "2026.10.12 ~10.18"
+      ],
+      "headers": [
+        [
+          "10월 12일",
+          "월요일"
+        ],
+        [
+          "10월 13일",
+          "화요일"
+        ],
+        [
+          "10월 14일",
+          "수요일"
+        ],
+        [
+          "10월 15일",
+          "목요일"
+        ],
+        [
+          "10월 16일",
+          "금요일"
+        ],
+        [
+          "10월 17일",
+          "토요일"
+        ],
+        [
+          "10월 18일",
+          "일요일"
+        ]
+      ]
+    },
+    "geometry": {
+      "imageSize": [
+        3508,
+        2480
+      ],
+      "horizontalRules": [
+        314,
+        433,
+        942,
+        1007,
+        1387,
+        1452,
+        1516,
+        1654,
+        2120,
+        2186,
+        2250
+      ],
+      "dayBoundaries": [
+        451,
+        844,
+        1244,
+        1636,
+        2041,
+        2426,
+        2869,
+        3302
+      ],
+      "unknownCells": {
+        "breakfast_western": [],
+        "cup_rice": [
+          2,
+          3
+        ],
+        "dinner": []
+      }
+    },
+    "attempts": [
+      {
+        "engine": "paddle",
+        "accepted": false,
+        "reason": "unreadable_column_date",
+        "elapsedSeconds": 5.015702624999989
+      },
+      {
+        "engine": "easy",
+        "accepted": true,
+        "reason": null,
+        "elapsedSeconds": 13.44166979100001
+      }
+    ]
+  }
+]

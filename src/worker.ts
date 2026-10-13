@@ -8,6 +8,7 @@ import { enqueue, nowIso } from './storage';
 import {handleNoticeIngest} from './notice-ingest';
 import {handleNoticeArchive} from './notice-archive';
 import {handleMealCompare} from './meal-compare';
+import {handleMealOcr} from './meal-ocr';
 import {operationalStatus} from './status';
 interface Interaction {id:string;application_id:string;token:string;type:number;guild_id?:string;member?:{permissions?:string};data?:{name:string;options?:{name:string;value:string}[]}}
 function reply(content:string,ephemeral=true) {return Response.json({type:4,data:{...message(content),...(ephemeral?{flags:64}:{})}});}
@@ -15,6 +16,7 @@ export async function handleRequest(request:Request,env:Env):Promise<Response> {
  if(new URL(request.url).pathname==='/internal/notices'&&request.method==='POST')return handleNoticeIngest(request,env);
  if(new URL(request.url).pathname==='/internal/notice-archive'&&request.method==='POST')return handleNoticeArchive(request,env);
  if(new URL(request.url).pathname==='/internal/meal-compare'&&request.method==='POST')return handleMealCompare(request,env);
+ if(new URL(request.url).pathname==='/internal/meal-ocr'&&request.method==='POST')return handleMealOcr(request,env);
  if(new URL(request.url).pathname!=='/interactions'||request.method!=='POST') return new Response('Not found',{status:404});
  if(!env.DISCORD_PUBLIC_KEY||!await verifyRequest(request,env.DISCORD_PUBLIC_KEY)) return new Response('Unauthorized',{status:401});
  let interaction:Interaction;

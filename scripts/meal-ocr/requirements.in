@@ -1,0 +1,8 @@
+# CPU evaluation baseline for Python 3.9 on macOS arm64.
+# Full resolved versions/hashes are in requirements.lock; no Worker dependencies.
+paddleocr==3.3.2
+paddlepaddle==3.2.2
+easyocr==1.7.2
+torch==2.8.0
+torchvision==0.23.0
+Pillow==11.3.0

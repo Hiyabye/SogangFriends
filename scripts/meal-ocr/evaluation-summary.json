@@ -1,0 +1,590 @@
+{
+  "evaluation_only": true,
+  "evaluated_on": "2026-10-13",
+  "platform": {
+    "system": "Darwin",
+    "machine": "arm64",
+    "python": "3.9.6"
+  },
+  "limitations": [
+    "Two days from one source image; operator-reviewed crop layout and source transcription.",
+    "CER removes whitespace and NFC-normalizes Korean; not a general accuracy benchmark.",
+    "Profile identity remains unverified; no serving data produced.",
+    "Times are single CPU observations with cached model weights; include labels and banner crops.",
+    "Model hash entries cover downloaded weight files, not every config/dictionary asset."
+  ],
+  "model_weights": [
+    {
+      "model": "PP-OCRv5_server_det",
+      "file": "inference.pdiparams",
+      "bytes": 87932887,
+      "sha256": "183146fe9d9910352f68482f623bcbbb9fa7b9e8fa1463b9ad288cef00524d2d"
+    },
+    {
+      "model": "korean_PP-OCRv5_mobile_rec",
+      "file": "inference.pdiparams",
+      "bytes": 13342671,
+      "sha256": "cac3e5f12cf04aaa77f6a5bc704e4e736ef2908476551891d84b41b4e9090462"
+    },
+    {
+      "model": "craft_mlt_25k",
+      "file": "craft_mlt_25k.pth",
+      "bytes": 83152330,
+      "sha256": "4a5efbfb48b4081100544e75e1e2b57f8de3d84f213004b14b85fd4b3748db17"
+    },
+    {
+      "model": "korean_g2",
+      "file": "korean_g2.pth",
+      "bytes": 16081533,
+      "sha256": "ecdead53c909748aad74bc2f2beeab3e3ad751134db6335e97ea19f879ca407e"
+    }
+  ],
+  "reports": [
+    {
+      "target_date": "2026-10-13",
+      "source_sha256": "f8f5a60905a10f308495422d6ed5b7629f53f6e1a30594f46d386a05a36b0ff4",
+      "layout_sha256": "0f3e5078f88a471cc8588ee592e4332c7cdb6ae64900d54691e48eb05bcbd360",
+      "truth_sha256": "d8a4e4dd20a2ee97eef8f25f28a45c3eceb466f47f86e6a6dcc0179a10a614ee",
+      "image_size": [
+        3508,
+        2480
+      ],
+      "identity_status": "unverified",
+      "engines": {
+        "paddle": {
+          "packages": {
+            "paddleocr": "3.3.2",
+            "paddlepaddle": "3.2.2"
+          },
+          "models": [
+            "PP-OCRv5_server_det",
+            "korean_PP-OCRv5_mobile_rec"
+          ],
+          "initialization_seconds": 7.063467667,
+          "crop_inference_seconds": 12.455350331999997,
+          "menu_character_edits": 0,
+          "menu_expected_characters": 124,
+          "menu_character_error_rate": 0.0,
+          "metrics": {
+            "banner": {
+              "expected_characters": 21,
+              "observed_characters": 21,
+              "character_edits": 0,
+              "character_error_rate": 0.0,
+              "exact_normalized_match": true,
+              "expected_blank": false,
+              "unexpected_text_in_blank": false
+            },
+            "breakfast_common": {
+              "expected_characters": 17,
+              "observed_characters": 17,
+              "character_edits": 0,
+              "character_error_rate": 0.0,
+              "exact_normalized_match": true,
+              "expected_blank": false,
+              "unexpected_text_in_blank": false
+            },
+            "drinks": {
+              "expected_characters": 5,
+              "observed_characters": 5,
+              "character_edits": 0,
+              "character_error_rate": 0.0,
+              "exact_normalized_match": true,
+              "expected_blank": false,
+              "unexpected_text_in_blank": false
+            },
+            "day_header": {
+              "expected_characters": 9,
+              "observed_characters": 9,
+              "character_edits": 0,
+              "character_error_rate": 0.0,
+              "exact_normalized_match": true,
+              "expected_blank": false,
+              "unexpected_text_in_blank": false
+            },
+            "breakfast_korean": {
+              "expected_characters": 28,
+              "observed_characters": 28,
+              "character_edits": 0,
+              "character_error_rate": 0.0,
+              "exact_normalized_match": true,
+              "expected_blank": false,
+              "unexpected_text_in_blank": false
+            },
+            "breakfast_western": {
+              "expected_characters": 33,
+              "observed_characters": 33,
+              "character_edits": 0,
+              "character_error_rate": 0.0,
+              "exact_normalized_match": true,
+              "expected_blank": false,
+              "unexpected_text_in_blank": false
+            },
+            "cup_rice": {
+              "expected_characters": 13,
+              "observed_characters": 13,
+              "character_edits": 0,
+              "character_error_rate": 0.0,
+              "exact_normalized_match": true,
+              "expected_blank": false,
+              "unexpected_text_in_blank": false
+            },
+            "dinner": {
+              "expected_characters": 28,
+              "observed_characters": 28,
+              "character_edits": 0,
+              "character_error_rate": 0.0,
+              "exact_normalized_match": true,
+              "expected_blank": false,
+              "unexpected_text_in_blank": false
+            }
+          },
+          "observed_lines": {
+            "banner": [
+              "주간메뉴표",
+              "2026.10.12~10.18"
+            ],
+            "day_header": [
+              "10월",
+              "13일",
+              "화요일"
+            ],
+            "breakfast_korean": [
+              "게살영양죽",
+              "동치미",
+              "계란찜",
+              "천사채샐러드",
+              "고추지무침",
+              "파인애플",
+              "우유"
+            ],
+            "breakfast_western": [
+              "#수제베이커리",
+              "갈릭피자",
+              "해쉬브라운&케찹",
+              "파인애플",
+              "씨리얼 2종/우유",
+              "콜라"
+            ],
+            "breakfast_common": [
+              "그린샐러드&드레싱 &셀프계란후라이"
+            ],
+            "cup_rice": [
+              "11:40",
+              "참치콘샐러드덮밥"
+            ],
+            "dinner": [
+              "차돌된장찌개",
+              "쌀밥",
+              "잡채",
+              "연두부&새싹간장",
+              "오그락지무침",
+              "배추김치"
+            ],
+            "drinks": [
+              "디톡스워터"
+            ]
+          }
+        },
+        "easy": {
+          "packages": {
+            "easyocr": "1.7.2",
+            "torch": "2.8.0",
+            "torchvision": "0.23.0"
+          },
+          "models": [
+            "craft_mlt_25k",
+            "korean_g2"
+          ],
+          "initialization_seconds": 3.175745083999999,
+          "crop_inference_seconds": 3.543388208000003,
+          "menu_character_edits": 14,
+          "menu_expected_characters": 124,
+          "menu_character_error_rate": 0.11290322580645161,
+          "metrics": {
+            "banner": {
+              "expected_characters": 21,
+              "observed_characters": 21,
+              "character_edits": 0,
+              "character_error_rate": 0.0,
+              "exact_normalized_match": true,
+              "expected_blank": false,
+              "unexpected_text_in_blank": false
+            },
+            "breakfast_common": {
+              "expected_characters": 17,
+              "observed_characters": 17,
+              "character_edits": 3,
+              "character_error_rate": 0.17647058823529413,
+              "exact_normalized_match": false,
+              "expected_blank": false,
+              "unexpected_text_in_blank": false
+            },
+            "drinks": {
+              "expected_characters": 5,
+              "observed_characters": 5,
+              "character_edits": 2,
+              "character_error_rate": 0.4,
+              "exact_normalized_match": false,
+              "expected_blank": false,
+              "unexpected_text_in_blank": false
+            },
+            "day_header": {
+              "expected_characters": 9,
+              "observed_characters": 9,
+              "character_edits": 0,
+              "character_error_rate": 0.0,
+              "exact_normalized_match": true,
+              "expected_blank": false,
+              "unexpected_text_in_blank": false
+            },
+            "breakfast_korean": {
+              "expected_characters": 28,
+              "observed_characters": 28,
+              "character_edits": 2,
+              "character_error_rate": 0.07142857142857142,
+              "exact_normalized_match": false,
+              "expected_blank": false,
+              "unexpected_text_in_blank": false
+            },
+            "breakfast_western": {
+              "expected_characters": 33,
+              "observed_characters": 33,
+              "character_edits": 3,
+              "character_error_rate": 0.09090909090909091,
+              "exact_normalized_match": false,
+              "expected_blank": false,
+              "unexpected_text_in_blank": false
+            },
+            "cup_rice": {
+              "expected_characters": 13,
+              "observed_characters": 13,
+              "character_edits": 3,
+              "character_error_rate": 0.23076923076923078,
+              "exact_normalized_match": false,
+              "expected_blank": false,
+              "unexpected_text_in_blank": false
+            },
+            "dinner": {
+              "expected_characters": 28,
+              "observed_characters": 28,
+              "character_edits": 1,
+              "character_error_rate": 0.03571428571428571,
+              "exact_normalized_match": false,
+              "expected_blank": false,
+              "unexpected_text_in_blank": false
+            }
+          },
+          "observed_lines": {
+            "banner": [
+              "주간메 뉴표",
+              "2026.10.12 ~10.18"
+            ],
+            "day_header": [
+              "10월 13일",
+              "화요일"
+            ],
+            "breakfast_korean": [
+              "게살영양죽",
+              "동치미",
+              "계란짐",
+              "천사채설러드",
+              "고추지무침",
+              "파인애플",
+              "우유"
+            ],
+            "breakfast_western": [
+              "#수제베이커리",
+              "갈릭피자",
+              "해쉬브라운&귀#",
+              "파인애풀",
+              "씨리얼 2종/우유",
+              "콜라"
+            ],
+            "breakfast_common": [
+              "그런실러드 & 드레싱 & 실프계란후라이"
+            ],
+            "cup_rice": [
+              "11:40",
+              "참치콤썰러드뒷밥"
+            ],
+            "dinner": [
+              "차돌된장찌개",
+              "쌀밥",
+              "잡채",
+              "연두부&새씩간장",
+              "오그락지무침",
+              "배추김치"
+            ],
+            "drinks": [
+              "디투스위터"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "target_date": "2026-10-17",
+      "source_sha256": "f8f5a60905a10f308495422d6ed5b7629f53f6e1a30594f46d386a05a36b0ff4",
+      "layout_sha256": "0f3e5078f88a471cc8588ee592e4332c7cdb6ae64900d54691e48eb05bcbd360",
+      "truth_sha256": "10672c79ab2182de51a595fc7e55f936cacd20b155e7e9efd10995a1a3203054",
+      "image_size": [
+        3508,
+        2480
+      ],
+      "identity_status": "unverified",
+      "engines": {
+        "paddle": {
+          "packages": {
+            "paddleocr": "3.3.2",
+            "paddlepaddle": "3.2.2"
+          },
+          "models": [
+            "PP-OCRv5_server_det",
+            "korean_PP-OCRv5_mobile_rec"
+          ],
+          "initialization_seconds": 5.836068125000001,
+          "crop_inference_seconds": 11.856913958000002,
+          "menu_character_edits": 0,
+          "menu_expected_characters": 114,
+          "menu_character_error_rate": 0.0,
+          "metrics": {
+            "banner": {
+              "expected_characters": 21,
+              "observed_characters": 21,
+              "character_edits": 0,
+              "character_error_rate": 0.0,
+              "exact_normalized_match": true,
+              "expected_blank": false,
+              "unexpected_text_in_blank": false
+            },
+            "breakfast_common": {
+              "expected_characters": 17,
+              "observed_characters": 17,
+              "character_edits": 0,
+              "character_error_rate": 0.0,
+              "exact_normalized_match": true,
+              "expected_blank": false,
+              "unexpected_text_in_blank": false
+            },
+            "drinks": {
+              "expected_characters": 5,
+              "observed_characters": 5,
+              "character_edits": 0,
+              "character_error_rate": 0.0,
+              "exact_normalized_match": true,
+              "expected_blank": false,
+              "unexpected_text_in_blank": false
+            },
+            "day_header": {
+              "expected_characters": 9,
+              "observed_characters": 9,
+              "character_edits": 0,
+              "character_error_rate": 0.0,
+              "exact_normalized_match": true,
+              "expected_blank": false,
+              "unexpected_text_in_blank": false
+            },
+            "breakfast_korean": {
+              "expected_characters": 45,
+              "observed_characters": 45,
+              "character_edits": 0,
+              "character_error_rate": 0.0,
+              "exact_normalized_match": true,
+              "expected_blank": false,
+              "unexpected_text_in_blank": false
+            },
+            "breakfast_western": {
+              "expected_characters": 47,
+              "observed_characters": 47,
+              "character_edits": 0,
+              "character_error_rate": 0.0,
+              "exact_normalized_match": true,
+              "expected_blank": false,
+              "unexpected_text_in_blank": false
+            },
+            "cup_rice": {
+              "expected_characters": 0,
+              "observed_characters": 0,
+              "character_edits": 0,
+              "character_error_rate": null,
+              "exact_normalized_match": true,
+              "expected_blank": true,
+              "unexpected_text_in_blank": false
+            },
+            "dinner": {
+              "expected_characters": 0,
+              "observed_characters": 0,
+              "character_edits": 0,
+              "character_error_rate": null,
+              "exact_normalized_match": true,
+              "expected_blank": true,
+              "unexpected_text_in_blank": false
+            }
+          },
+          "observed_lines": {
+            "banner": [
+              "주간메뉴표",
+              "2026.10.12~10.18"
+            ],
+            "day_header": [
+              "10월",
+              "17일",
+              "토요일"
+            ],
+            "breakfast_korean": [
+              "함박스테이크*데미그라소스",
+              "쌀밥",
+              "얼갈이된장국",
+              "메추리알조림",
+              "도시락김구이",
+              "배추김치",
+              "패션후르츠/우유"
+            ],
+            "breakfast_western": [
+              "#Self베이리",
+              "토스트빵&버터&딸기잼",
+              "슬라이스햄&슬리이스치즈",
+              "패션후르츠",
+              "씨리얼 2종/우유",
+              "요거트"
+            ],
+            "breakfast_common": [
+              "그린샐러드&드레싱 &셀프계란후라이"
+            ],
+            "cup_rice": [],
+            "dinner": [],
+            "drinks": [
+              "디톡스워터"
+            ]
+          }
+        },
+        "easy": {
+          "packages": {
+            "easyocr": "1.7.2",
+            "torch": "2.8.0",
+            "torchvision": "0.23.0"
+          },
+          "models": [
+            "craft_mlt_25k",
+            "korean_g2"
+          ],
+          "initialization_seconds": 3.1123578750000007,
+          "crop_inference_seconds": 3.6473454580000073,
+          "menu_character_edits": 10,
+          "menu_expected_characters": 114,
+          "menu_character_error_rate": 0.08771929824561403,
+          "metrics": {
+            "banner": {
+              "expected_characters": 21,
+              "observed_characters": 21,
+              "character_edits": 0,
+              "character_error_rate": 0.0,
+              "exact_normalized_match": true,
+              "expected_blank": false,
+              "unexpected_text_in_blank": false
+            },
+            "breakfast_common": {
+              "expected_characters": 17,
+              "observed_characters": 17,
+              "character_edits": 3,
+              "character_error_rate": 0.17647058823529413,
+              "exact_normalized_match": false,
+              "expected_blank": false,
+              "unexpected_text_in_blank": false
+            },
+            "drinks": {
+              "expected_characters": 5,
+              "observed_characters": 5,
+              "character_edits": 2,
+              "character_error_rate": 0.4,
+              "exact_normalized_match": false,
+              "expected_blank": false,
+              "unexpected_text_in_blank": false
+            },
+            "day_header": {
+              "expected_characters": 9,
+              "observed_characters": 9,
+              "character_edits": 0,
+              "character_error_rate": 0.0,
+              "exact_normalized_match": true,
+              "expected_blank": false,
+              "unexpected_text_in_blank": false
+            },
+            "breakfast_korean": {
+              "expected_characters": 45,
+              "observed_characters": 44,
+              "character_edits": 3,
+              "character_error_rate": 0.06666666666666667,
+              "exact_normalized_match": false,
+              "expected_blank": false,
+              "unexpected_text_in_blank": false
+            },
+            "breakfast_western": {
+              "expected_characters": 47,
+              "observed_characters": 47,
+              "character_edits": 2,
+              "character_error_rate": 0.0425531914893617,
+              "exact_normalized_match": false,
+              "expected_blank": false,
+              "unexpected_text_in_blank": false
+            },
+            "cup_rice": {
+              "expected_characters": 0,
+              "observed_characters": 0,
+              "character_edits": 0,
+              "character_error_rate": null,
+              "exact_normalized_match": true,
+              "expected_blank": true,
+              "unexpected_text_in_blank": false
+            },
+            "dinner": {
+              "expected_characters": 0,
+              "observed_characters": 0,
+              "character_edits": 0,
+              "character_error_rate": null,
+              "exact_normalized_match": true,
+              "expected_blank": true,
+              "unexpected_text_in_blank": false
+            }
+          },
+          "observed_lines": {
+            "banner": [
+              "주간메 뉴표",
+              "2026.10.12 ~10.18"
+            ],
+            "day_header": [
+              "10월 17일",
+              "토요일"
+            ],
+            "breakfast_korean": [
+              "함박스테이크*데미그라소스",
+              "쌀밥",
+              "얼갈이된장국",
+              "메주리알조림",
+              "도시락김구이",
+              "배추김치",
+              "패션후르최우유"
+            ],
+            "breakfast_western": [
+              "#Self 베이리",
+              "토스트빵&버터& 딸기짐",
+              "슬라이스행&슬리이스치즈",
+              "패션후르츠",
+              "씨리얼 2종/우유",
+              "요거트"
+            ],
+            "breakfast_common": [
+              "그런실러드 & 드레싱 & 실프계란후라이"
+            ],
+            "cup_rice": [],
+            "dinner": [],
+            "drinks": [
+              "디투스위터"
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

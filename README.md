@@ -104,7 +104,19 @@ Cron은 15분마다 실행. `/status`의 `식단·Cron`에서 `id=cron`의 `last
 
 `MEAL_TIME_KST=07:30` 기준 현재 15분 window 안에서만 하루 식단/마감 작업을 생성합니다. 놓친 일일 작업은 다음 날 몰아 보내지 않습니다. 이미 생성된 식단/마감 delivery도 해당 KST 날짜가 지나면 `expired`; 공지는 intent 생성 전후 모두 최대 24시간만 유효합니다.
 
-## 4. OpenRouter 비용·정확성 설정
+## 식단 OCR 교체: 로컬 구현, 운영 전환 대기
+
+사용자 승인으로 GitHub Actions CPU에서 **PaddleOCR 우선, EasyOCR fallback**을 실행하는 경로를 추가했습니다. Cloudflare Worker는 native PaddlePaddle/PyTorch를 실행하지 않고, 전용 `MEAL_OCR_INGEST_SECRET`으로 서명된 `/internal/meal-ocr` 요청을 검증해 기존 D1 주간 캐시에 저장합니다. 이미지 해시·`ocr-v1`·공식 게시물·기간이 모두 같으면 재추출을 생략합니다. Actions의 패키지/모델 캐시는 실행 비용을 줄이는 용도이며 D1 식단 캐시를 대체하지 않습니다.
+
+고정 좌표 대신 이미지의 표 선으로 날짜별 칸을 찾습니다. 배너와 7개 열의 실제 날짜·요일이 공식 게시물 기간과 일치해야 저장합니다. 메뉴 오타는 허용하며 날짜를 추측해 보정하지 않습니다. 경계가 사라진 병합 셀은 해당 날짜들의 항목을 `unknown`으로 둡니다. 공식 게시물의 inline PNG도 크기·형식·픽셀 제한을 거쳐 처리하며 D1에는 이미지 바이트가 아닌 게시물 식별자만 보관합니다.
+
+7개 공식 주간 이미지의 로컬 검사에서 6개를 받아들였고, 배너와 열 날짜가 다른 9월 14–20일 자료는 거절했습니다. 두 월간 전환 사례를 포함하며, 현재 10월 12–18일 자료는 PaddleOCR의 요일 판독 실패 후 EasyOCR로 통과했습니다. [검사 결과와 실행 방법](scripts/meal-ocr/README.md)을 확인하세요.
+
+`.github/workflows/meal-ocr.yml`은 **수동 전용**입니다. 기본 `ingest=false`는 OCR 검증만 하고 D1/Discord에 쓰지 않습니다. 두 native 엔진 실행 및 모델 weight 해시 검사와 최소 1개 실제 원본 처리에 성공해야 검증으로 인정합니다. 명시적 `ingest=true`만 전용 secret/endpoint를 사용하며, 전체 batch가 성공한 뒤 검증된 결과를 접수합니다. Discord 발송 작업은 만들지 않습니다. 현재·다음 KST 주간 보관과 기존 이미지 fallback은 유지합니다.
+
+**Ubuntu/Python 3.11 Actions 실행, 원격 ingestion 및 운영 전환은 아직 검증하지 않았습니다.** Linux CPU용 hash-pinned lock은 준비했으나 dependency resolution은 실행 성공의 증거가 아닙니다. 따라서 기존 OpenRouter 코드/설정은 아직 제거하지 않았습니다. native 모델 다운로드, workflow 실행, secret 설정·배포, 자동 schedule 활성화와 기존 추출 경로 제거는 검증 및 운영 승인 뒤 진행합니다. 과거 작업/불확실 사용 예약은 전환 시에도 보존합니다.
+
+## 4. 기존 OpenRouter 비용·정확성 설정
 
 **OpenRouter는 무료 모델만 사용합니다. 유료 모델 및 유료 fallback은 금지합니다.** https://openrouter.ai/settings/keys 에서 이 앱 전용 키를 만드세요. 코드가 `:free` 접미사와 카탈로그의 모든 과금 항목이 0인지 확인하고, provider 가격 상한도 0으로 설정합니다. 조건 불일치 시 호출하지 않습니다. 키 credit limit도 추가 방어로 설정하세요.
 
@@ -213,6 +225,6 @@ npx wrangler d1 execute sogang-friends --remote --command="SELECT day,state,rese
 
 `npm run check`는 fixture + 실제 Ed25519 + 실제 SQLite SQL 테스트. baseline/pins/upserts/last-good, 날짜·요일·만료, KST/D-day, permissions/guild scope, atomic claims/outbox/budget, ambiguous POST/429/expiry/token purge, bounded menus/mentions를 검증합니다. CI는 오프라인 검사와 dry-run bundle만 수행합니다.
 
-운영 검증과 남은 한계는 [docs/VERIFICATION.md](docs/VERIFICATION.md)를 참고하세요. 2026-10-10 사용자 승인으로 D1 archive migration·운영 배포·최근 원문215개 저장과 6개 보드 첫 backfill 페이지를 확인했습니다. Git의 archive flag와 운영 설정/Actions에서 원문 보관을 활성화했습니다. 전체 이력 완료·공지 LLM 처리와 실제 식단 OCR 성공은 아직 확인하지 못했습니다. dry-run은 배포가 아닙니다.
+운영 검증과 남은 한계는 [docs/VERIFICATION.md](docs/VERIFICATION.md)를 참고하세요. 2026-10-10 사용자 승인으로 D1 archive migration·운영 배포·최근 원문215개 저장과 6개 보드 첫 backfill 페이지를 확인했습니다. Git의 archive flag와 운영 설정/Actions에서 원문 보관을 활성화했습니다. 전체 이력 완료·공지 LLM 처리와 운영 OCR 성공은 아직 확인하지 못했습니다. 별도 로컬 native OCR 검사는 7개 주간 원본 중 날짜가 일치하는 6개에서 성공했으며, Actions 실행과 운영 ingestion은 미검증입니다. dry-run은 배포가 아닙니다.
 
 다음 버전: staging 통합 테스트, 날짜별 식단 사람 승인/정확히 묶인 검토 override, decoded 이미지 pixel 제한, 안전한 관리자 reconciliation 도구, 공지 보관 용량/정책, 분산 요청 pacing, 공지 원문 기반 실제 LLM 가공, 일정 정정 알림. 정확히 한 번 발송은 보장하지 않으며 Discord POST와 D1 기록은 비원자적입니다.
