@@ -30,14 +30,17 @@ node --test scripts/meal-ocr/collect.node-tests.mjs
 ```
 
 The optional `prepare --cache` and `ingest` commands contact the scoped Worker
-endpoint and mutate D1; do not run them before operational approval. They require
+endpoint and mutate D1. The user approved operational activation on 2026-10-13. They require
 `MEAL_OCR_INGEST_URL` ending in `/internal/meal-ocr` and a dedicated
 `MEAL_OCR_INGEST_SECRET` (at least 32 characters) in both Actions and Worker.
 The authenticated lookup captures source metadata and refreshes only an exact
 cache identity. Store is idempotent and conditionally matches current source
 metadata inside a D1 transaction. Neither creates Discord delivery jobs.
 
-`.github/workflows/meal-ocr.yml` is manual-only, with `ingest=false` by default.
+`.github/workflows/meal-ocr.yml` refreshes at 06:40/17:10 KST (21:40/08:10 UTC)
+with ingestion enabled. Manual dispatch retains `ingest=false` by default. Worker
+reports are independently planned at 07:00/17:30 KST. GitHub schedules can be
+delayed/dropped; a 20-minute buffer does not guarantee completion before reports.
 It uses Ubuntu 24.04/Python 3.11 and the separate CPU-targeted
 `requirements-actions.lock`. Pip/model caches are expendable accelerators;
 existing D1 is the authoritative current+next KST-week result cache. Native runtime
@@ -53,8 +56,9 @@ and October 12–18 was accepted with EasyOCR after Paddle missed a weekday.
 `actions-verification.json` records reviewed provenance and observed dates;
 Worker regression tests independently accept its identity. This was `ingest=false`:
 no D1 writes, Discord posts, OpenRouter calls or deployment. The staged OCR commit
-was pushed with approval; subsequent OpenRouter retirement remains local.
-Remote ingestion, dedicated-secret setup and scheduled activation remain unapproved.
+was pushed with approval. The user subsequently approved retirement push,
+dedicated-secret setup, deployment, live ingestion and scheduled refreshes/reports.
+See `docs/VERIFICATION.md` for the actual operational execution record.
 
 ## Original diagnostic tool
 

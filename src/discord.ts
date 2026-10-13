@@ -70,12 +70,12 @@ function truncate(content: string, limit: number): string {
 
 export interface DiscordImageEmbed { title: string; url: string; image: { url: string } }
 export interface DiscordImageFile { filename: string; bytes: Uint8Array; mime: string }
-export type DiscordMessageInput = string | { content: string; embeds?: DiscordImageEmbed[]; file?: DiscordImageFile };
+export type DiscordMessageInput = string | { content: string; embeds?: DiscordImageEmbed[]; file?: DiscordImageFile; files?: DiscordImageFile[] };
 export function message(input: DiscordMessageInput): { content: string; allowed_mentions: { parse: never[] }; embeds?: DiscordImageEmbed[]; attachments?: {id:number;filename:string}[] } {
   const content = typeof input === 'string' ? input : input.content;
   return { content: truncate(content, 2000), allowed_mentions: { parse: [] },
     ...(typeof input !== 'string' && input.embeds ? { embeds: input.embeds } : {}),
-    ...(typeof input !== 'string' && input.file ? { attachments: [{id:0,filename:input.file.filename}] } : {}) };
+    ...(typeof input !== 'string' && (input.file || input.files?.length) ? { attachments: (input.files??[input.file!]).map((file,id)=>({id,filename:file.filename})) } : {}) };
 }
 
 function display(text: string): string {
@@ -105,10 +105,10 @@ export async function discordSend(env: Pick<Env, 'DISCORD_TOKEN'>, channel: stri
   if (!env.DISCORD_TOKEN || !/^\d+$/.test(channel)) return { state: 'failed' };
   const headers: Record<string,string> = { Authorization: `Bot ${env.DISCORD_TOKEN}` };
   let body: string | FormData;
-  if (typeof content !== 'string' && content.file) {
+  if (typeof content !== 'string' && (content.file || content.files?.length)) {
     const form = new FormData();
     form.append('payload_json', JSON.stringify(message(content)));
-    form.append('files[0]', new Blob([Uint8Array.from(content.file.bytes).buffer], {type:content.file.mime}), content.file.filename);
+    for(const [id,file] of (content.files??[content.file!]).entries())form.append(`files[${id}]`, new Blob([Uint8Array.from(file.bytes).buffer], {type:file.mime}), file.filename);
     body = form;
   } else {
     headers['Content-Type'] = 'application/json';

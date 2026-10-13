@@ -1,5 +1,9 @@
-name: manual meal OCR verification
+name: meal OCR refresh
 on:
+  schedule:
+    # UTC: 06:40 and 17:10 KST, before the 07:00 / 17:30 Worker reports.
+    - cron: '40 21 * * *'
+    - cron: '10 8 * * *'
   workflow_dispatch:
     inputs:
       ingest:
@@ -19,6 +23,7 @@ jobs:
     env:
       NODE_EXTRA_CA_CERTS: certificates/sogang-ov-r36.pem
       OCR_OUTPUT: scripts/meal-ocr/output/actions-run
+      OCR_INGEST: ${{ github.event_name == 'schedule' || inputs.ingest }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -49,22 +54,22 @@ jobs:
           mkdir -p scripts/meal-ocr/output
           python scripts/meal-ocr/runtime-check.py --output scripts/meal-ocr/output/runtime-check.json > scripts/meal-ocr/output/runtime-engine.log 2>&1
       - name: Collect retained official sources without ingestion
-        if: ${{ !inputs.ingest }}
+        if: ${{ env.OCR_INGEST != 'true' }}
         run: node scripts/meal-ocr/collect.mjs prepare --output "$OCR_OUTPUT"
       - name: Capture sources and consult the live exact-identity cache
-        if: ${{ inputs.ingest }}
+        if: ${{ env.OCR_INGEST == 'true' }}
         run: node scripts/meal-ocr/collect.mjs prepare --cache --output "$OCR_OUTPUT"
         env:
           MEAL_OCR_INGEST_URL: ${{ vars.MEAL_OCR_INGEST_URL || secrets.MEAL_OCR_INGEST_URL }}
           MEAL_OCR_INGEST_SECRET: ${{ secrets.MEAL_OCR_INGEST_SECRET }}
       - name: Verify real OCR on at least one source
-        if: ${{ !inputs.ingest }}
+        if: ${{ env.OCR_INGEST != 'true' }}
         run: python scripts/meal-ocr/run-batch.py --output "$OCR_OUTPUT" --require-processed
       - name: Process uncached weeks for approved ingestion
-        if: ${{ inputs.ingest }}
+        if: ${{ env.OCR_INGEST == 'true' }}
         run: python scripts/meal-ocr/run-batch.py --output "$OCR_OUTPUT"
       - name: Ingest only an entirely successful batch (no Discord delivery jobs)
-        if: ${{ success() && inputs.ingest }}
+        if: ${{ success() && env.OCR_INGEST == 'true' }}
         run: node scripts/meal-ocr/collect.mjs ingest --output "$OCR_OUTPUT"
         env:
           MEAL_OCR_INGEST_URL: ${{ vars.MEAL_OCR_INGEST_URL || secrets.MEAL_OCR_INGEST_URL }}

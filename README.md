@@ -102,7 +102,7 @@ Wrangler account 선택 및 Queues 요금/retention은 현재 계정 정책을 �
 
 Cron은 15분마다 실행. `/status`의 `식단·Cron`에서 `id=cron`의 `last_attempt`/`last_success`/`error`로 계획 단계 실행을 확인합니다. Cloudflare Cron 변경은 전파에 최대 15분이 걸릴 수 있습니다. Cron row가 없으면 handler가 DB에 실행 시작을 기록하지 않은 상태이며, 학교 사이트 오류와 구분해야 합니다. `NOTICE_COLLECTION_MODE=external`에서는 공지를 Node/Actions가 수집하고, 기존 직접 수집 작업도 실행하지 않습니다. `worker` 모드(이전 설정의 기본값)에서만 `SOURCE_INTERVAL_HOURS=6`의 bucket마다 게시판을 직접 수집하며, 학교 본부 인증서 체인 문제는 이 모드에서 해결되지 않습니다. 식단 발견은 두 모드 모두 같은 bucket으로 계획합니다. 재배포는 baseline을 초기화하지 않습니다. 첫 수집에서는 기존 공지를 저장하고 발송하지 않습니다. 다운타임은 공지 bounded window(최대 3페이지) 안에서만 복구하며 전체 이력을 보장하지 않습니다.
 
-`MEAL_TIME_KST=07:30` 기준 현재 15분 window 안에서만 하루 식단/마감 작업을 생성합니다. 놓친 일일 작업은 다음 날 몰아 보내지 않습니다. 이미 생성된 식단/마감 delivery도 해당 KST 날짜가 지나면 `expired`; 공지는 intent 생성 전후 모두 최대 24시간만 유효합니다.
+식단 보고는 **07:00 / 17:30 KST**의 현재 15분 window 안에서만 생성합니다. 07:00은 오늘 아침+오늘 저녁, 17:30은 오늘 저녁+내일 아침이며 날짜별로 표시합니다. 컵밥은 이 두 보고에 넣지 않고 `/meal`의 하루 전체 조회에 유지합니다. `MEAL_TIME_KST=07:30`은 기존 학사일정 게시물 갱신 시간으로만 유지합니다. 놓친 일일 작업은 다음 날 몰아 보내지 않습니다. 이미 생성된 식단/마감 delivery도 해당 KST 날짜가 지나면 `expired`; 공지는 intent 생성 전후 모두 최대 24시간만 유효합니다.
 
 ## 식단 OCR 교체: 로컬 구현, 운영 전환 대기
 
@@ -112,9 +112,9 @@ Cron은 15분마다 실행. `/status`의 `식단·Cron`에서 `id=cron`의 `last
 
 7개 공식 주간 이미지의 로컬 검사에서 6개를 받아들였고, 배너와 열 날짜가 다른 9월 14–20일 자료는 거절했습니다. 두 월간 전환 사례를 포함하며, 현재 10월 12–18일 자료는 PaddleOCR의 요일 판독 실패 후 EasyOCR로 통과했습니다. [검사 결과와 실행 방법](scripts/meal-ocr/README.md)을 확인하세요.
 
-`.github/workflows/meal-ocr.yml`은 **수동 전용**입니다. 기본 `ingest=false`는 OCR 검증만 하고 D1/Discord에 쓰지 않습니다. 두 native 엔진 실행 및 모델 weight 해시 검사와 최소 1개 실제 원본 처리에 성공해야 검증으로 인정합니다. 명시적 `ingest=true`만 전용 secret/endpoint를 사용하며, 전체 batch가 성공한 뒤 검증된 결과를 접수합니다. Discord 발송 작업은 만들지 않습니다. 현재·다음 KST 주간 보관과 기존 이미지 fallback은 유지합니다.
+`.github/workflows/meal-ocr.yml`은 **06:40 / 17:10 KST 자동 refresh**와 수동 실행을 지원합니다(UTC `40 21 * * *`, `10 8 * * *`). 자동 refresh는 D1 접수를 활성화하고, 수동 기본 `ingest=false`는 OCR 검증만 하며 D1/Discord에 쓰지 않습니다. GitHub schedule은 지연되거나 누락될 수 있으므로 20분 여유가 성공을 보장하지는 않습니다([공식 문서](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)). 두 native 엔진 실행 및 모델 weight 해시 검사와 최소 1개 실제 원본 처리에 성공해야 검증으로 인정합니다. 자동 refresh 또는 명시적 수동 `ingest=true`만 전용 secret/endpoint를 사용하며, 전체 batch가 성공한 뒤 검증된 결과를 접수합니다. Discord 발송 작업은 만들지 않습니다. 현재·다음 KST 주간 보관과 기존 이미지 fallback은 유지합니다.
 
-**Ubuntu 24.04/Python 3.11 실제 Actions 검증에 성공했습니다.** [검증 run 38345856766](https://github.com/Hiyabye/SogangFriends/actions/runs/38345856766)은 두 native 엔진·모델 해시·실제 10월 12–18일 원본을 확인했으며 EasyOCR fallback으로 날짜 검증에 통과했습니다. `ingest=false`여서 원격 접수·Discord 발송은 수행하지 않았습니다. 이를 확인한 뒤 식단 OpenRouter 호출/설정과 비교 workflow를 로컬에서 제거했습니다. 이전 `meal-extract` 메시지는 호출 없이 `needs_review`로 보류하며 기존 payload/시도 수/오류/사용 예약을 보존합니다. 비교 endpoint는 410을 반환합니다. **secret 설정·배포·원격 ingestion·자동 schedule 활성화는 아직 승인/실행하지 않았습니다.** 이 전환이 운영 환경에 반영됐다는 뜻은 아닙니다.
+**Ubuntu 24.04/Python 3.11 실제 Actions 검증에 성공했습니다.** [검증 run 38345856766](https://github.com/Hiyabye/SogangFriends/actions/runs/38345856766)은 두 native 엔진·모델 해시·실제 10월 12–18일 원본을 확인했으며 EasyOCR fallback으로 날짜 검증에 통과했습니다. `ingest=false`여서 원격 접수·Discord 발송은 수행하지 않았습니다. 이를 확인한 뒤 식단 OpenRouter 호출/설정과 비교 workflow를 로컬에서 제거했습니다. 이전 `meal-extract` 메시지는 호출 없이 `needs_review`로 보류하며 기존 payload/시도 수/오류/사용 예약을 보존합니다. 비교 endpoint는 410을 반환합니다. 이후 사용자가 retirement push, secret 설정, 배포와 live ingestion 및 위 refresh/report 시간을 승인했습니다. 실제 운영 실행 결과는 [검증 기록](docs/VERIFICATION.md)에 별도로 기록합니다.
 
 ## 4. 식단 캐시·과거 LLM 감사 이력
 
@@ -122,7 +122,7 @@ Cron은 15분마다 실행. `/status`의 `식단·Cron`에서 `id=cron`의 `last
 
 D1의 과거 `llm_usage`와 작업 payload/상태/시도 수는 삭제하거나 초기화하지 않습니다. `/status`는 오늘 KST 날짜의 과거 LLM 예약을 조회할 뿐 현재 OCR 실행 예산을 나타내지 않습니다. 미제공 비용을 0으로 바꾸거나 불확실 예약을 해제하지 않습니다. 이전 pending/retry 추출 메시지는 시도 수를 증가시키지 않고 검토 상태로 보류하며, running lease와 완료/실패/불확실 결과는 재실행하지 않습니다. 더는 과거 설정이나 메시지로 OpenRouter를 호출할 수 없습니다. 원격 키/secret 삭제도 이 코드 변경에서 수행하지 않습니다.
 
-식단은 장기 이력이 아니라 현재·다음 KST 월요일–일요일 주간 캐시로 관리합니다. `0005_meal_sources.sql`의 원문 이미지 URL/기간은 OCR 결과와 별도로 보관하며 Cron/발견 작업이 범위 밖 메뉴·이미지 메타데이터·거절 결과 본문을 정리합니다. 작업 ID, 감사 메타데이터와 불확실한 사용 예약은 삭제하지 않으며 공지 누적 보관은 그대로입니다. `/meal`은 사용할 텍스트가 없으면 요청 날짜와 일치하는 공식 주간 이미지를 내려받아 **이미지 파일로 직접 첨부**합니다(봇에 Attach Files 권한 필요). 외부 URL 미리보기에 의존하지 않습니다. PNG/JPEG 확인과 스트리밍 5MiB 제한을 적용하며 다운로드 실패 시 실패 안내와 출처 링크만 보냅니다. 맞는 이미지가 없거나 보관 범위 밖이면 링크만 안내합니다. 명령 실행이나 이미지 대체 발송으로 모델을 호출하지 않습니다. 오전 7:30 정기 식단 발송도 새 발송 작업부터 같은 이미지 대체 방식을 사용합니다. 사용 가능한 식단 텍스트가 있으면 텍스트로 보내고, 추출 결과가 없거나 표시할 항목이 모두 unknown이면 날짜에 맞는 공식 이미지를 첨부합니다. 이미지 다운로드 중 날짜가 지나면 발송하지 않습니다. 기존 실패·불확실 발송을 자동 재실행하지 않습니다.
+식단은 장기 이력이 아니라 현재·다음 KST 월요일–일요일 주간 캐시로 관리합니다. `0005_meal_sources.sql`의 원문 이미지 URL/기간은 OCR 결과와 별도로 보관하며 Cron/발견 작업이 범위 밖 메뉴·이미지 메타데이터·거절 결과 본문을 정리합니다. 작업 ID, 감사 메타데이터와 불확실한 사용 예약은 삭제하지 않으며 공지 누적 보관은 그대로입니다. `/meal`은 사용할 텍스트가 없으면 요청 날짜와 일치하는 공식 주간 이미지를 내려받아 **이미지 파일로 직접 첨부**합니다(봇에 Attach Files 권한 필요). 외부 URL 미리보기에 의존하지 않습니다. PNG/JPEG 확인과 스트리밍 5MiB 제한을 적용하며 다운로드 실패 시 실패 안내와 출처 링크만 보냅니다. 맞는 이미지가 없거나 보관 범위 밖이면 링크만 안내합니다. 명령 실행이나 이미지 대체 발송으로 모델을 호출하지 않습니다. 07:00/17:30 보고도 선택한 식사 항목이 모두 unknown이면 날짜에 맞는 공식 이미지를 첨부합니다. 같은 주의 이미지는 한 번만 다운로드/첨부하며, 일요일 저녁에는 다음 월요일의 원본이 있으면 다음 주 이미지도 첨부합니다(합계5MiB 제한; 없거나 제한 초과 시 해당 날짜의 원문 링크). 아침 보고는 17:30 이후 보내지 않으며, 저녁 보고는 KST 자정 이후 보내지 않습니다. 이미지 다운로드 중 날짜가 지나면 발송하지 않습니다. 기존 실패·불확실 발송을 자동 재실행하지 않습니다.
 
 JSON과 `certain`의 날짜·요일 의미는 유지합니다. 메뉴 오타는 허용하고 읽지 못한 셀은 `unknown`으로 표시합니다. 식단 텍스트에 OCR 오탈자 안내를 붙입니다. 날짜 불일치, 빈 셀 메뉴 생성과 요일 이동은 허용하지 않으며 이전 실패/불확실 작업을 재실행하지 않습니다.
 
@@ -207,6 +207,6 @@ npx wrangler d1 execute sogang-friends --remote --command="SELECT day,state,rese
 
 `npm run check`는 fixture + 실제 Ed25519 + 실제 SQLite SQL 테스트. baseline/pins/upserts/last-good, 날짜·요일·만료, KST/D-day, permissions/guild scope, atomic claims/outbox/budget, ambiguous POST/429/expiry/token purge, bounded menus/mentions를 검증합니다. CI는 오프라인 검사와 dry-run bundle만 수행합니다.
 
-운영 검증과 남은 한계는 [docs/VERIFICATION.md](docs/VERIFICATION.md)를 참고하세요. 2026-10-10 사용자 승인으로 D1 archive migration·운영 배포·최근 원문215개 저장과 6개 보드 첫 backfill 페이지를 확인했습니다. Git의 archive flag와 운영 설정/Actions에서 원문 보관을 활성화했습니다. 전체 이력 완료·공지 LLM 처리와 운영 OCR 성공은 아직 확인하지 못했습니다. 별도 로컬 native OCR 검사는 7개 주간 원본 중 날짜가 일치하는 6개에서 성공했고 실제 Actions 검증도 통과했습니다. 운영 ingestion과 전환 배포는 미검증입니다. dry-run은 배포가 아닙니다.
+운영 검증과 남은 한계는 [docs/VERIFICATION.md](docs/VERIFICATION.md)를 참고하세요. 2026-10-10 사용자 승인으로 D1 archive migration·운영 배포·최근 원문215개 저장과 6개 보드 첫 backfill 페이지를 확인했습니다. Git의 archive flag와 운영 설정/Actions에서 원문 보관을 활성화했습니다. 전체 이력 완료·공지 LLM 처리와 운영 OCR 성공은 아직 확인하지 못했습니다. 별도 로컬 native OCR 검사는 7개 주간 원본 중 날짜가 일치하는 6개에서 성공했고 실제 Actions 검증도 통과했습니다. 운영 ingestion·전환 배포의 실행 결과는 검증 기록을 확인하세요. dry-run은 배포가 아닙니다.
 
 다음 버전: staging 통합 테스트, 날짜별 식단 사람 승인/정확히 묶인 검토 override, decoded 이미지 pixel 제한, 안전한 관리자 reconciliation 도구, 공지 보관 용량/정책, 분산 요청 pacing, 공지 원문 기반 실제 LLM 가공, 일정 정정 알림. 정확히 한 번 발송은 보장하지 않으며 Discord POST와 D1 기록은 비원자적입니다.

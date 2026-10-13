@@ -41,6 +41,16 @@ function display(label:string,o:Offering,budget:number):string {
  if(prefix.length+menu.length+time.length>budget)menu=clip(menu,Math.max(1,budget-prefix.length-time.length-suffix.length))+suffix;
  return prefix+menu+time;
 }
+export type MealPeriod='breakfast'|'dinner';
+export function formatMealPart(week:MealWeek|null,date:string,sourceUrl:string,period:MealPeriod,label:string):string {
+ const day=week?.certain&&date>=week.start&&date<=week.end?week.days.find(day=>day.date===date):undefined;
+ const heading=`${label} (${date})`,source=`원문: <${sourceUrl}>`;
+ if(!day)return `${heading}\n식단 확인 불가\n${source}`;
+ const entries:[string,Offering][]=period==='dinner'?[['석식',day.dinner]]:[['조식 한식',day.breakfastKorean],['조식 양식·일품',day.breakfastWestern]];
+ if(period==='breakfast'&&day.breakfastCommon.status!=='unknown')entries.push(['조식 공통',day.breakfastCommon]);
+ const budget=Math.floor((950-heading.length-source.length-entries.length-2)/entries.length);
+ return [heading,...entries.map(([name,offering])=>display(name,offering,budget)),source].join('\n');
+}
 export function formatMeal(week:MealWeek,date:string,sourceUrl:string):string {
  if(sourceUrl.length>1000)throw new Error('Meal source URL too long');
  const day=validDate(date)&&week.certain&&date>=week.start&&date<=week.end?week.days.find(d=>d.date===date):undefined;

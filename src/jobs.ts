@@ -1,8 +1,8 @@
 import type { Env, Job, Notice, MealWeek, Schedule } from './types';
 import { SOURCES, collectNotices, discoverMealSources, fetchImage } from './sources';
-import { formatMeal } from './meals';
-import { batchNotices, discordSend, allowedGuild, type DiscordMessageInput } from './discord';
-import { todayKst, validDate } from './time';
+import { formatMeal, formatMealPart, type MealPeriod } from './meals';
+import { batchNotices, discordSend, allowedGuild, type DiscordMessageInput, type DiscordImageFile } from './discord';
+import { addDays, todayKst, validDate } from './time';
 import { validateSchedules } from './schedule';
 import { updateScheduleSummary } from './schedule-summary';
 import { claim, deliveryIntent, dispatch, enqueue, nowIso, recover, retryJob, saveNotices, sourceFailure } from './storage';
@@ -38,6 +38,39 @@ export async function mealCommandResponse(env:Env,date:string):Promise<DiscordMe
  if(source.start<window.start||source.end>window.end)return unavailableMeal(env,date);
  return {content:`${date} 식단 텍스트를 확인하지 못해 공식 주간 메뉴표를 이미지 파일로 첨부합니다 (${source.start} ~ ${source.end}).\n원문: <${source.url}>`,file:{filename:`bellarmino-${source.start}-${source.end}.${image.mime==='image/png'?'png':'jpg'}`,bytes:image.bytes,mime:image.mime}};
 }
+export type MealSlot='morning'|'evening';
+function reportExpiry(date:string,slot:MealSlot):string {
+ return slot==='morning'?`${date}T08:30:00.000Z`:`${date}T15:00:00.000Z`;
+}
+export async function mealReportResponse(env:Env,date:string,slot:MealSlot,includeFiles=true):Promise<DiscordMessageInput> {
+ const targets:{date:string;period:MealPeriod;label:string}[]=slot==='morning'
+  ?[{date,period:'breakfast',label:'오늘 아침'},{date,period:'dinner',label:'오늘 저녁'}]
+  :[{date,period:'dinner',label:'오늘 저녁'},{date:addDays(date,1),period:'breakfast',label:'내일 아침'}];
+ const parts:string[]=[],files:DiscordImageFile[]=[],downloaded=new Set<string>();let bytes=0;
+ for(const target of targets){
+  const cached=await retainedMeal(env,target.date),day=cached?.week.days.find(day=>day.date===target.date);
+  const usable=day&&(target.period==='dinner'?day.dinner.status!=='unknown':[day.breakfastKorean,day.breakfastWestern,day.breakfastCommon].some(offering=>offering.status!=='unknown'));
+  const source=!usable?await mealImageSource(env,target.date):null;
+  const url=cached?.sourceUrl??source?.url??'https://scc.sogang.ac.kr/front/cmsboardlist.do?bbsConfigFK=1185&siteId=dormitory';
+  let part=formatMealPart(cached?.week??null,target.date,url,target.period,target.label);
+  if(!usable&&source&&includeFiles){
+   if(!downloaded.has(source.url)){
+    downloaded.add(source.url);
+    try{
+     const image=await fetchImage(source.imageUrl),window=mealWindow();
+     if(source.start>=window.start&&source.end<=window.end&&bytes+image.bytes.length<=5*1024*1024){
+      files.push({filename:`bellarmino-${source.start}-${source.end}.${image.mime==='image/png'?'png':'jpg'}`,bytes:image.bytes,mime:image.mime});bytes+=image.bytes.length;
+     }
+    }catch{/* Keep the exact dated section/link; no stale substitute or upstream details. */}
+   }
+   if(files.some(file=>file.filename.startsWith(`bellarmino-${source.start}-${source.end}.`)))part+='\n첨부: 해당 주 공식 메뉴표';
+   else part+='\n이미지 첨부 불가 — 원문을 확인하세요.';
+  }
+  parts.push(part);
+ }
+ const content=parts.join('\n\n')+'\nOCR 판독 결과로 메뉴명에 오탈자가 있을 수 있습니다. 미확인 항목은 원문을 확인하세요.';
+ return files.length?{content,files}:content;
+}
 export async function planCron(env:Env,scheduledTime:number) {
  await pruneMealContent(env);
  await recover(env);
@@ -52,8 +85,10 @@ export async function planCron(env:Env,scheduledTime:number) {
  // Only the current quarter-hour window; no replay of missed daily broadcasts after downtime.
  const mins=(s:string)=>Number(s.slice(0,2))*60+Number(s.slice(3));
  if(mins(hhmm)>=mins(target)&&mins(hhmm)<mins(target)+15) {
- await enqueue(env,`meal-daily:${date}`,'meal-daily',{date});
  await enqueue(env,`schedule-daily:${date}`,'schedule-daily',{date});
+ }
+ for(const [mealSlot,time] of [['morning','07:00'],['evening','17:30']] as const){
+  if(mins(hhmm)>=mins(time)&&mins(hhmm)<mins(time)+15)await enqueue(env,`meal-report:${date}:${mealSlot}`,'meal-report',{date,mealSlot});
  }
  await dispatch(env);
 }
@@ -112,6 +147,12 @@ export async function executeJob(env:Env,job:Job) {
  if(!committed)throw new Error('Meal quarantine not committed');
  break;
  }
+ case 'meal-report': {
+ if(payload.date!==todayKst()||!['morning','evening'].includes(payload.mealSlot)||nowIso()>=reportExpiry(payload.date,payload.mealSlot))break;
+ const content=await mealReportResponse(env,payload.date,payload.mealSlot,false);
+ for(const g of await recipients(env,'meals_channel'))await deliveryIntent(env,`meal-report:${g.id}:${payload.date}:${payload.mealSlot}`,g.id,g.channel,typeof content==='string'?content:content.content,reportExpiry(payload.date,payload.mealSlot),payload.date,payload.mealSlot);
+ break;
+ }
  case 'meal-daily': {
  if(payload.date!==todayKst()) break;
  const content=await mealResponse(env,payload.date);
@@ -133,8 +174,8 @@ export async function executeJob(env:Env,job:Job) {
  const row=await env.DB.prepare("UPDATE deliveries SET state='sending',updated_at=? WHERE id=? AND state IN ('pending','retry') RETURNING *").bind(nowIso(),payload.deliveryId).first<{guild_id:string;channel_id:string;content:string;expires_at:string}>();
  if(!row) break;
  if(!allowedGuild(row.guild_id,env)){await env.DB.prepare("UPDATE deliveries SET state='failed',error='guild disabled' WHERE id=?").bind(payload.deliveryId).run();break;}
- // Keep file bytes transient; only the meal date belongs in the durable intent.
- const content=payload.mealDate?await mealCommandResponse(env,payload.mealDate):row.content;
+ // Keep file bytes transient; the durable intent carries only the meal date/slot.
+ const content=payload.mealDate&&payload.mealSlot?await mealReportResponse(env,payload.mealDate,payload.mealSlot):payload.mealDate?await mealCommandResponse(env,payload.mealDate):row.content;
  if(row.expires_at<=nowIso()||(payload.mealDate&&payload.mealDate!==todayKst())){
  await env.DB.prepare("UPDATE deliveries SET state='expired',updated_at=? WHERE id=? AND state='sending'").bind(nowIso(),payload.deliveryId).run();break;
  }

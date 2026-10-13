@@ -85,9 +85,9 @@ export async function completeInteraction(env:Env,job:Job) {
  await env.DB.prepare("UPDATE jobs SET state='needs_review',lease_until=NULL,error='interaction expired before reply' WHERE id=?").bind(job.id).run();return;
  }
  let body:BodyInit=JSON.stringify(message(content)),headers:HeadersInit|undefined={'Content-Type':'application/json'};
- if(typeof content!=='string'&&content.file){
+ if(typeof content!=='string'&&(content.file||content.files?.length)){
  const form=new FormData();form.append('payload_json',body);
- form.append('files[0]',new Blob([Uint8Array.from(content.file.bytes).buffer],{type:content.file.mime}),content.file.filename);
+ for(const [id,file] of (content.files??[content.file!]).entries())form.append(`files[${id}]`,new Blob([Uint8Array.from(file.bytes).buffer],{type:file.mime}),file.filename);
  body=form;headers=undefined;
  }
  // PATCH replaces the explicit attachment set on retries; never log files, tokens or REST bodies.
