@@ -3,10 +3,11 @@ import {handleRequest} from '../src/worker';
 import {consume,planCron} from '../src/jobs';
 import {validateNoticeSnapshot} from '../src/notice-ingest';
 import {SOURCES} from '../src/sources';
+import {noticeDetailUrl} from '../src/legacy-notice-sources.ts';
 import {testDatabase} from './helpers/db';
 import {signedSnapshot} from '../scripts/notice-collector.mjs';
 const secret='fixture-collector-secret-'.repeat(3);
-const notice=(source='university',id='1')=>({id,source,title:'공식 공지',published:'2026-10-09',url:source==='university'?`https://www.sogang.ac.kr/ko/detail/${id}?bbsConfigFk=2`:`https://computing.sogang.ac.kr/ko/community/${source}/detail/${id}`});
+const notice=(source='university',id='1')=>({id,source,title:'공식 공지',published:'2026-10-09',url:noticeDetailUrl(SOURCES.find(s=>s.id===source)!,id)});
 async function request(data:unknown,timestamp=String(Date.now()),key=secret) {
  const body=typeof data==='string'?data:JSON.stringify(data);
  const k=await crypto.subtle.importKey('raw',new TextEncoder().encode(key),{name:'HMAC',hash:'SHA-256'},false,['sign']);
@@ -16,8 +17,8 @@ async function request(data:unknown,timestamp=String(Date.now()),key=secret) {
 function database(){const db=testDatabase();db.env.NOTICE_COLLECTION_MODE='external';db.env.NOTICE_INGEST_SECRET=secret;return db;}
 afterEach(()=>{vi.restoreAllMocks();vi.useRealTimers();});
 describe('authenticated notice ingestion',()=>{
- it('accepts all six canonical sources and rejects foreign or cross-board links and duplicate IDs',()=>{
-  expect(SOURCES).toHaveLength(6);
+ it('accepts all eleven canonical sources and rejects foreign or cross-board links and duplicate IDs',()=>{
+  expect(SOURCES).toHaveLength(11);
   for(const s of SOURCES)expect(validateNoticeSnapshot({source:s.id,notices:[notice(s.id)]}).source).toBe(s.id);
   for(const n of [{...notice(),url:'https://attacker.test/1'},{...notice('news'),source:'career'},{...notice(),published:'2026-02-30'},{...notice(),id:'0'},{...notice(),title:''}])expect(()=>validateNoticeSnapshot({source:n.source,notices:[n]})).toThrow();
   expect(()=>validateNoticeSnapshot({source:'university',notices:[notice(),notice()]})).toThrow();

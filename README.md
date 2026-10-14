@@ -4,7 +4,7 @@
 
 ## 구현 범위
 
-- 공식 6개 게시판(학교 학사공지, 소프트웨어융합대학 학사·대학원·대외정보·소식·취업) 수집. 독립 Node 수집기 + 이 프로젝트의 GitHub Actions가 HTTPS 목록을 읽고, 인증된 snapshot을 Worker에 전달. 안정 ID 저장, 최초 baseline, 새 공지 묶음 발송, 제목/링크 갱신. [공지 수집 설정](docs/NOTICE-COLLECTOR.md)
+- 공식 11개 게시판(학교 학사공지, 소프트웨어융합대학 학사·대학원·대외정보·소식·취업, SW중심대학사업단 공지·소식·언론보도, 융합교육원 공지, 빅데이터 융복합 인재양성사업단 공지) 수집. 독립 Node 수집기 + 이 프로젝트의 GitHub Actions가 HTTPS 목록을 읽고, 인증된 snapshot을 Worker에 전달. 안정 ID 저장, 최초 baseline, 새 공지 묶음 발송, 제목/링크 갱신. [공지 수집 설정](docs/NOTICE-COLLECTOR.md)
 - 공식 벨라르미노 게시물/이미지 발견, SHA-256 캐시, Actions CPU PaddleOCR/EasyOCR + JSON 결과 접수, 관측 날짜/요일/기간/운영 근거 검증. 만료 식단을 오늘 식단으로 대체하지 않음.
 - 공식 학사 일정 27개 초기 자료(2026-09–2027-02), `/schedule` 30일 조회. 승인된 앞으로의 일정은 D-day 게시물 하나를 매일 편집해 표시. 사용자 검토·승인 전 자동 게시 비활성. 날짜만 있는 마감에 시각을 만들지 않음.
 - `/meal [date]`, `/notices [source]`, `/schedule`, `/setup`, `/status`. 조회는 저장 데이터만 사용하며 HTTP 명령에서 직접 LLM을 호출하지 않음. 모든 명령을 먼저 defer, Queue가 원래 응답을 편집.
@@ -183,7 +183,7 @@ npx wrangler d1 execute sogang-friends --remote --command="SELECT day,state,rese
 | 벨라르미노 | https://scc.sogang.ac.kr/front/cmsboardlist.do?bbsConfigFK=1185&siteId=dormitory&currentPage=1 |
 | 학사 일정 | https://www.sogang.ac.kr/ko/academic-support/calendar |
 
-최근 수집은 대학50개/컴퓨팅3페이지/식단2페이지로 제한합니다. 원문 보관을 활성화하면 최근 목록 중 아직 보관하지 않은 공지의 상세 본문도 Node에서 수집합니다. 과거 backfill은 별도 기능으로 한 실행당 최대6개 목록 페이지, 추가3초 간격, 약7분 예산을 사용합니다. HTML/JSON2MiB, timeout20초, redirects 거부, 기본 요청 간격1초. 분산 수집 pacer는 없으므로 Actions의 공통 concurrency group을 유지하세요.
+최근 수집은 학교 본부50개/공지 HTML 게시판별3페이지/식단2페이지로 제한합니다. SW중심대학사업단은 페이지당 일반 글15개, 나머지 공지 HTML 게시판은10개입니다. 원문 보관을 활성화하면 최근 목록 중 아직 보관하지 않은 공지의 상세 본문도 Node에서 수집합니다. 과거 backfill은 별도 기능으로 한 실행당 최대6개 목록 페이지, 추가3초 간격, 약7분 예산을 사용합니다. HTML/JSON2MiB, timeout20초, redirects 거부, 기본 요청 간격1초. 분산 수집 pacer는 없으므로 Actions의 공통 concurrency group을 유지하세요.
 
 본부 중간 인증서 누락은 직접 Workers 수집에서 HTTP526으로 확인했습니다. 이 프로젝트의 독립 Node/Actions 수집기는 검증된 public intermediate CA를 사용해 6개 게시판의 수집·운영 업로드에 성공했습니다. **TLS 검증을 끄지 않았으며** 다른 저장소의 배포·피드에 의존하지 않습니다.
 
@@ -191,7 +191,7 @@ npx wrangler d1 execute sogang-friends --remote --command="SELECT day,state,rese
 
 `notices`는 `(source,id)`로 수집한 메타데이터를 누적하며 오래된 row를 삭제하지 않습니다. 학교 학사는 공식 `pkId`, 컴퓨팅은 `/detail/<ID>`를 사용하므로 게시판 간 ID 충돌은 없습니다.
 
-**6개 게시판의 원문 보관·느린 1회 backfill을 구현했으며, 기본 비활성입니다.** [설정·운영 안내](docs/NOTICE-ARCHIVE.md)
+**11개 게시판의 원문 보관·느린 1회 backfill을 구현했으며, 기본 비활성입니다.** 새로 추가한5개 게시판은 로컬 읽기 전용 수집·본문·마지막 페이지 검증까지 완료했으며, 운영 반영은 아직 하지 않았습니다. 기존 baseline과 backfill 진행은 유지하고, 새 게시판의 첫 수집은 기존 글을 알리지 않습니다. 새 과거 이력 cursor 생성은 별도 승인된 시작 작업이 필요합니다. [설정·운영 안내](docs/NOTICE-ARCHIVE.md)
 
 - **기존 D1만 사용**: `notice_archive_raw`에 원본 본문 HTML(TEXT), 공지 메타데이터·첨부/이미지 링크(JSON), 수집 시각·해시를 저장합니다. R2 bucket이나 Cloudflare 카드 등록은 필요 없습니다.
 - `raw/<source>/<id>.json`은 archive 인덱스의 **논리적 식별자**이며 실제 파일/폴더가 아닙니다. 원문과 인덱스는 하나의 D1 transaction으로 저장하고 공지별 최초 원문 하나만 보관합니다. 파일 바이너리, 수정 본문 이력, 최신 원문 재검증은 제공하지 않습니다.

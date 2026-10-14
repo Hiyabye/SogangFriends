@@ -2,7 +2,7 @@
 
 ## Architecture and scope
 
-The project-owned Node collector reads these six official boards using the same `src/sources.ts` catalog and parsers as the Worker:
+The project-owned Node collector reads these eleven official boards using the same `src/sources.ts` catalog and parsers as the Worker:
 
 | Source ID | Official page |
 | --- | --- |
@@ -12,8 +12,13 @@ The project-owned Node collector reads these six official boards using the same 
 | `externalInfo` | <https://computing.sogang.ac.kr/ko/community/externalInfo/list> |
 | `news` | <https://computing.sogang.ac.kr/ko/community/news/list> |
 | `career` | <https://computing.sogang.ac.kr/ko/community/career/list> |
+| `sweduNotice` | <https://scc.sogang.ac.kr/front/cmsboardlist.do?siteId=sweducenter&bbsConfigFK=7250> |
+| `sweduNews` | <https://scc.sogang.ac.kr/front/cmsboardlist.do?siteId=sweducenter&bbsConfigFK=7251> |
+| `sweduPress` | <https://scc.sogang.ac.kr/front/cmsboardlist.do?siteId=sweducenter&bbsConfigFK=7252> |
+| `conveduNotice` | <https://convedu.sogang.ac.kr/front/cmsboardlist.do?siteId=convedu&bbsConfigFK=5551> |
+| `bdataNotice` | <https://sc.sogang.ac.kr/bdata/4305.html> |
 
-The university page loads its public JSON API; the five college lists are HTML. Collection is bounded to 50 university entries and at most three pages per college board. This command is recent-list polling, **not full-history traversal**. Optional raw capture and a separately gated resumable history workflow are documented in [NOTICE-ARCHIVE.md](NOTICE-ARCHIVE.md). Original official IDs, URLs, dates and pinned-row handling are preserved. A source failure does not stop the other five; any failure makes the process exit nonzero so Actions reports the incomplete run. With `NOTICE_ARCHIVE_ENABLED=true`, missing article bodies are captured into the existing D1 database through the authenticated archive API; no R2 bucket or Cloudflare account token is needed. Raw capture and ordinary queued-snapshot acceptance are separate outcomes. Raw-capture failure marks the run incomplete but still submits successfully collected live metadata, preserving ordinary notice polling and alerts. Disabled mode retains the original metadata-only behavior.
+The university page loads its public JSON API; the other ten lists are HTML. The big-data page embeds the official WebSTYLIST board `bbsid=5256`, which is collected directly; `4305` is the wrapper-page ID, not an article ID. Collection is bounded to 50 university entries and at most three pages per HTML board (15 regular rows per SW board page; 10 for the other HTML boards). This command is recent-list polling, **not full-history traversal**. Optional raw capture and a separately gated resumable history workflow are documented in [NOTICE-ARCHIVE.md](NOTICE-ARCHIVE.md). Original official IDs, URLs, dates and pinned-row handling are preserved. A source failure does not stop the other sources; any failure makes the process exit nonzero so Actions reports the incomplete run. With `NOTICE_ARCHIVE_ENABLED=true`, missing article bodies are captured into the existing D1 database through the authenticated archive API; no R2 bucket or Cloudflare account token is needed. Raw capture and ordinary queued-snapshot acceptance are separate outcomes. Raw-capture failure marks the run incomplete but still submits successfully collected live metadata, preserving ordinary notice polling and alerts. Disabled mode retains the original metadata-only behavior.
 
 Node -> authenticated Worker `/internal/notices` -> durable D1/Queue -> existing baseline/deduplication/Discord delivery. The collector does not need Discord, OpenRouter or Cloudflare account API credentials. It does not call a model or directly post to Discord. First successful collection of a new board establishes a baseline and does not notify its existing posts. Existing board baselines remain intact.
 
@@ -47,8 +52,8 @@ There is no insecure TLS fallback. Startup rejects missing/wrong CA configuratio
 
    No URL credentials, query string or fragment. Never put the authentication secret in the URL. The script refuses other paths and never follows an ingestion redirect.
 4. Push the reviewed code/workflow to the project's own GitHub repository **only after approval**. Scheduled workflows run from the default branch. Check GitHub Actions availability and billing for the repository before enabling it; private-repository usage may consume included minutes or incur charges. No paid service is assumed.
-5. Run the `collect notices` workflow manually once through `workflow_dispatch`, then inspect its six source counts and Worker `/status`/D1 outcomes. An HTTP 202 confirms durable acceptance, not completion of downstream processing or Discord delivery.
-6. Confirm successful collection of all six IDs. Use `/notices source:university`, `/notices source:graduateNotice`, etc. The new boards should not broadcast their pre-existing posts on baseline.
+5. Run the `collect notices` workflow manually once through `workflow_dispatch`, then inspect its eleven source counts and Worker `/status`/D1 outcomes. An HTTP 202 confirms durable acceptance, not completion of downstream processing or Discord delivery.
+6. Confirm successful collection of all eleven IDs. Use `/notices source:university`, `/notices source:graduateNotice`, etc. The new boards should not broadcast their pre-existing posts on baseline.
 
 The scheduled workflow runs at **00:10, 06:10, 12:10 and 18:10 UTC** (09:10, 15:10, 21:10 and 03:10 KST). GitHub schedules may be delayed, and inactive public repositories may have schedules disabled; monitor `/status` freshness rather than treating the cron expression as an SLA. Concurrency is serialized without canceling an in-progress collection; the job timeout is thirty minutes to allow initial raw capture. Each run fetches directly from official sources, without relying on an old repository's output.
 
@@ -84,4 +89,6 @@ Accepted snapshots expire after thirty minutes rather than replaying old data in
 
 Fixture tests cover fingerprint/signature/expiry, endpoint validation, HMAC bytes, exact retry reuse, retry bounds, source isolation and no-upload default. A dry-run can verify real HTTPS source collection without changing Worker or Discord state. Neither test mode proves Actions scheduling, production ingress deployment/configuration, remote Queue completion or Discord delivery. No --send execution or deployment is performed merely by adding these files.
 
-Local read-only validation on 2026-10-10 KST, Node 26.11.0, with the scoped verified CA: **50 university, 34 academicNotice, 32 graduateNotice, 32 externalInfo, 34 news, 33 career** notices collected successfully (215 total). Output contained counts only. No snapshot upload occurred. The Node 24 Actions runner remains unexecuted; its runtime is configured, not remotely verified.
+Local read-only validation on 2026-10-10 KST, Node 26.11.0, with the scoped verified CA: **50 university, 34 academicNotice, 32 graduateNotice, 32 externalInfo, 34 news, 33 career** notices collected successfully (215 total). Output contained counts only. No snapshot upload occurred. This initial local check is historical; subsequent six-board operating verification is recorded in [VERIFICATION.md](VERIFICATION.md).
+
+The five additional adapters have passed local read-only HTTPS collection and raw-detail checks, including terminal historical pages. Recent counts were 49 `sweduNotice`, 2 `sweduNews`, 9 `sweduPress`, 37 `conveduNotice` and 30 `bdataNotice`. These results do not establish deployment, Actions execution or production ingestion for the additional sources. Adding them locally does not reset the existing six baselines; their first successful live snapshots establish separate silent baselines.

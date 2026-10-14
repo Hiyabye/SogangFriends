@@ -58,12 +58,12 @@ describe('standalone authenticated notice collector',()=>{
  });
  it('defaults to a no-upload dry run and keeps later sources running after a failure',async()=>{
   const collect=vi.fn(async(source:any)=>{if(source.id==='university')throw new Error('Author name and private upstream body');return [{...row,source:source.id}];});const upload=vi.fn();const log=vi.fn();
-  expect(await runCollector({collect,upload,log})).toBe(1);expect(collect).toHaveBeenCalledTimes(6);expect(upload).not.toHaveBeenCalled();
+  expect(await runCollector({collect,upload,log})).toBe(1);expect(collect).toHaveBeenCalledTimes(SOURCES.length);expect(upload).not.toHaveBeenCalled();
   expect(log.mock.calls.flat().join('\n')).not.toContain('Author');expect(log.mock.calls.flat().join('\n')).toContain('dry-run');
  });
  it('isolates upload failures and requires complete send configuration before collection',async()=>{
   const collect=vi.fn(async(source:any)=>[{...row,source:source.id}]);const upload=vi.fn().mockRejectedValueOnce(new Error(secret)).mockResolvedValue(undefined);const log=vi.fn();
-  expect(await runCollector({send:true,endpoint,secret,collect,upload,log})).toBe(1);expect(upload).toHaveBeenCalledTimes(6);expect(log.mock.calls.flat().join('\n')).not.toContain(secret);
+  expect(await runCollector({send:true,endpoint,secret,collect,upload,log})).toBe(1);expect(upload).toHaveBeenCalledTimes(SOURCES.length);expect(log.mock.calls.flat().join('\n')).not.toContain(secret);
   const unused=vi.fn();await expect(runCollector({send:true,endpoint,secret:'short',collect:unused})).rejects.toThrow('32');expect(unused).not.toHaveBeenCalled();
   await expect(runCollector({send:true,endpoint:'http://unsafe',secret,collect:unused})).rejects.toThrow('URL');expect(unused).not.toHaveBeenCalled();
  });
@@ -74,7 +74,7 @@ describe('standalone authenticated notice collector',()=>{
   const upload=vi.fn(async(_url:string,value:any)=>{events.push(`metadata:${JSON.parse(value.body).source}`);});
   expect(await runCollector({send:true,endpoint,secret,collect,capture,upload,archiveEnabled:true,log:vi.fn()})).toBe(0);
   expect(events).toEqual(SOURCES.flatMap(source=>[`raw:${source.id}`,`metadata:${source.id}`]));
-  expect(capture).toHaveBeenCalledTimes(6);expect(upload).toHaveBeenCalledTimes(6);
+  expect(capture).toHaveBeenCalledTimes(SOURCES.length);expect(upload).toHaveBeenCalledTimes(SOURCES.length);
  });
  it.each(['incomplete','throws'])('submits all live snapshots but reports an incomplete run when raw capture %s',async(mode)=>{
   const collect=vi.fn(async(source:any)=>[{...row,source:source.id}]);
@@ -87,15 +87,15 @@ describe('standalone authenticated notice collector',()=>{
   });
   const upload=vi.fn(async()=>{}),log=vi.fn();
   expect(await runCollector({send:true,endpoint,secret,collect,capture,upload,archiveEnabled:true,log})).toBe(1);
-  expect(capture).toHaveBeenCalledTimes(6);expect(upload).toHaveBeenCalledTimes(6);
+  expect(capture).toHaveBeenCalledTimes(SOURCES.length);expect(upload).toHaveBeenCalledTimes(SOURCES.length);
   expect(upload.mock.calls.map((call:any)=>JSON.parse(call[1].body).source)).toEqual(SOURCES.map(source=>source.id));
   const output=log.mock.calls.flat().join('\n');
   expect(output).toContain('university: raw capture incomplete; submitting live metadata independently');
   expect(output).toContain('university: 1 notices accepted');
   expect(output).not.toContain('private source body');expect(output).not.toContain(secret);
  });
- it('covers exactly the six approved source IDs and rejects insecure CLI launch settings',async()=>{
-  expect(SOURCES.map(s=>s.id)).toEqual(['university','academicNotice','graduateNotice','externalInfo','news','career']);
+ it('covers exactly the eleven approved source IDs and rejects insecure CLI launch settings',async()=>{
+  expect(SOURCES.map(s=>s.id)).toEqual(['university','academicNotice','graduateNotice','externalInfo','news','career','sweduNotice','sweduNews','sweduPress','conveduNotice','bdataNotice']);
   await expect(main(['--unknown'],{})).rejects.toThrow('Usage');
   await expect(main(['--send','--dry-run'],{})).rejects.toThrow('Usage');
   await expect(main([], {NODE_TLS_REJECT_UNAUTHORIZED:'0'})).rejects.toThrow('TLS verification');

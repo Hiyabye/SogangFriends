@@ -1,5 +1,6 @@
 import type {Env,Notice} from './types';
 import {SOURCES} from './sources';
+import {noticeDetailUrl} from './legacy-notice-sources.ts';
 import {validDate} from './time';
 import {enqueue} from './storage';
 const LIMIT=256*1024;
@@ -13,7 +14,7 @@ export function validateNoticeSnapshot(value:unknown):{source:string;notices:Not
   if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('Invalid notice');
   const n=value as Record<string,unknown>;
   if(typeof n.id!=='string'||! /^[1-9]\d{0,19}$/.test(n.id)||ids.has(n.id)||n.source!==source.id||typeof n.title!=='string'||!n.title.trim()||n.title.length>1000||typeof n.published!=='string'||!validDate(n.published))throw new Error('Invalid notice');
-  const url=source.kind==='university'?`https://www.sogang.ac.kr/ko/detail/${n.id}?bbsConfigFk=2`:`https://computing.sogang.ac.kr/ko/community/${source.id}/detail/${n.id}`;
+  const url=noticeDetailUrl(source,n.id);
   if(n.url!==url)throw new Error('Invalid notice URL');
   ids.add(n.id);return {id:n.id,source:source.id,title:n.title.trim(),published:n.published,url};
  });

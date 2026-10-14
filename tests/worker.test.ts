@@ -5,6 +5,7 @@ import {consume} from '../src/jobs';
 import {enqueue, recover, saveNotices} from '../src/storage';
 import {validateMeal} from '../src/meals';
 import {addDays,todayKst} from '../src/time';
+import {SOURCES} from '../src/sources';
 vi.mock('../src/sources',async importOriginal=>({...await importOriginal<object>(),fetchImage:vi.fn(async()=>({bytes:new Uint8Array([1]),mime:'image/png',hash:'hash'}))}));
 afterEach(()=>vi.restoreAllMocks());
 async function signed(env:any,body:any) {
@@ -23,12 +24,12 @@ describe('interaction and durable integration',()=>{
    await worker.scheduled(event,db.env);
    const health=db.sqlite.prepare("SELECT last_attempt,last_success,error FROM health WHERE id='cron'").get()!;
    expect(health.last_attempt).toBeTruthy();expect(health.last_success).toBeTruthy();expect(health.error).toBeNull();
-   expect(db.sqlite.prepare("SELECT COUNT(*) AS n FROM jobs WHERE kind='collect'").get()!.n).toBe(6);
+   expect(db.sqlite.prepare("SELECT COUNT(*) AS n FROM jobs WHERE kind='collect'").get()!.n).toBe(SOURCES.length);
    expect(db.sqlite.prepare("SELECT COUNT(*) AS n FROM jobs WHERE kind='meal-discover'").get()!.n).toBe(1);
-   expect(db.env.JOBS.send).toHaveBeenCalledTimes(9);
+   expect(db.env.JOBS.send).toHaveBeenCalledTimes(SOURCES.length+3);
    expect(db.sqlite.prepare("SELECT COUNT(*) AS n FROM jobs WHERE kind IN ('meal-refresh','schedule-refresh')").get()!.n).toBe(2);
    await worker.scheduled(event,db.env);
-   expect(db.sqlite.prepare('SELECT COUNT(*) AS n FROM jobs').get()!.n).toBe(9);
+   expect(db.sqlite.prepare('SELECT COUNT(*) AS n FROM jobs').get()!.n).toBe(SOURCES.length+3);
   } finally {db.close();}
  });
  it('discovers source metadata but never plans inference even with stale legacy settings',async()=>{

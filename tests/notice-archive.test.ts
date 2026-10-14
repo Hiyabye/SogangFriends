@@ -39,12 +39,12 @@ describe('private raw notice archive',()=>{
    expect(db.objects.size).toBe(0);expect(db.sqlite.prepare('SELECT COUNT(*) AS n FROM notice_archive_progress').get()!.n).toBe(0);
   }finally{db.close();}
  });
- it('starts six cursors once without resetting completed progress',async()=>{
+ it('starts eleven cursors once without resetting completed progress',async()=>{
   const db=database();try{
    expect(await (await db.send({action:'status'})).json()).toEqual({sources:[]});
    expect(await (await db.send({action:'start'})).json()).toEqual({started:true});
    const status=await (await db.send({action:'status'})).json() as any;
-   expect(status.sources).toHaveLength(6);expect(status.sources.every((s:any)=>s.page===1&&s.state==='active'&&s.started_at==='2026-10-09T17:00:00.000Z'&&s.updated_at===s.started_at)).toBe(true);
+   expect(status.sources).toHaveLength(SOURCES.length);expect(status.sources.every((s:any)=>s.page===1&&s.state==='active'&&s.started_at==='2026-10-09T17:00:00.000Z'&&s.updated_at===s.started_at)).toBe(true);
    db.sqlite.prepare("UPDATE notice_archive_progress SET page=7,state='done' WHERE source='news'").run();
    vi.setSystemTime(new Date('2026-10-12T00:00:00Z'));await db.send({action:'start'});
    expect(db.sqlite.prepare("SELECT page,state,started_at,updated_at FROM notice_archive_progress WHERE source='news'").get()).toMatchObject({page:7,state:'done',started_at:'2026-10-09T17:00:00.000Z',updated_at:'2026-10-09T17:00:00.000Z'});
@@ -134,7 +134,7 @@ describe('private raw notice archive',()=>{
    expect((await db.send({action:'commit',source:'university',page:3,ids:['1'],done:true})).status).toBe(409);
    expect(db.sqlite.prepare('SELECT COUNT(*) AS n FROM notices').get()!.n).toBe(1);expect(db.sqlite.prepare('SELECT COUNT(*) AS n FROM jobs').get()!.n).toBe(0);
    expect(db.sqlite.prepare('SELECT COUNT(*) AS n FROM deliveries').get()!.n).toBe(0);
-   const sources=db.sqlite.prepare('SELECT * FROM sources').all();expect(sources).toHaveLength(6);for(const s of sources)expect(s).toMatchObject({initialized:1,last_success:'live-success',last_attempt:'live-attempt'});
+   const sources=db.sqlite.prepare('SELECT * FROM sources').all();expect(sources).toHaveLength(SOURCES.length);for(const s of sources)expect(s).toMatchObject({initialized:1,last_success:'live-success',last_attempt:'live-attempt'});
   }finally{db.close();}
  });
  it('commits a full fifty-row page with five queries and at most fifty-four bound parameters',async()=>{

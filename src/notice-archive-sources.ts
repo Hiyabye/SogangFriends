@@ -2,6 +2,7 @@ import {parse,type DefaultTreeAdapterMap} from 'parse5';
 import {SOURCES,sourceBytes,parseUniversity,parseComputing} from './sources.ts';
 import type {Notice,Source} from './types';
 import {validDate} from './time.ts';
+import {noticeDetailUrl,legacyNoticePageUrl,parseLegacyNoticePage,parseLegacyNoticeRaw} from './legacy-notice-sources.ts';
 
 type Node=DefaultTreeAdapterMap['node'];
 export interface NoticeRaw {notice:Notice;bodyHtml:string;attachments:string[];imageUrls:string[]}
@@ -15,7 +16,7 @@ const text=(n:Node)=>all(n,x=>x.nodeName==='#text').map(x=>'value'in x?x.value:'
 function sourceFor(source:Source):Source{const known=SOURCES.find(s=>s.id===source.id&&s.url===source.url&&s.kind===source.kind);if(!known)throw new Error('Unknown archive source');return known;}
 function identity(notice:Notice):Source{
  const source=SOURCES.find(s=>s.id===notice.source);if(!source||!/^[1-9]\d{0,19}$/.test(notice.id)||!validDate(notice.published)||!notice.title.trim()||notice.title.length>1000)throw new Error('Invalid archive notice');
- const expected=source.kind==='university'?`https://www.sogang.ac.kr/ko/detail/${notice.id}?bbsConfigFk=2`:`https://computing.sogang.ac.kr/ko/community/${source.id}/detail/${notice.id}`;
+ const expected=noticeDetailUrl(source,notice.id);
  if(notice.url!==expected)throw new Error('Wrong archive detail URL');return source;
 }
 function board(doc:Node,source:Source):Node{
@@ -27,7 +28,9 @@ function board(doc:Node,source:Source):Node{
  if(all(content,n=>tag(n,'input')&&attr(n,'type')==='search').some(n=>attr(n,'value').trim()))throw new Error('Filtered archive search');return content;
 }
 export function parseNoticePage(input:string,source:Source,page:number):{notices:Notice[];done:boolean}{
- sourceFor(source);if(source.kind!=='computing'||!Number.isSafeInteger(page)||page<1)throw new Error('Invalid archive page');
+ sourceFor(source);if(!Number.isSafeInteger(page)||page<1)throw new Error('Invalid archive page');
+ if(source.kind==='cms'||source.kind==='legacy'){const parsed=parseLegacyNoticePage(input,source,page);return {notices:parsed.notices,done:parsed.done};}
+ if(source.kind!=='computing')throw new Error('Invalid archive page');
  const doc=parse(input);const content=board(doc,source);const pagination=one(content,n=>cls(n,'board-pagination'));
  if(text(one(pagination,n=>tag(n,'button')&&attr(n,'aria-current')==='page'))!==String(page))throw new Error('Wrong archive page number');
  const last=one(pagination,n=>tag(n,'button')&&attr(n,'aria-label')==='마지막 페이지');const lastDisabled='attrs'in last&&last.attrs.some(a=>a.name==='disabled');
@@ -41,9 +44,9 @@ export function parseNoticePage(input:string,source:Source,page:number):{notices
 }
 export async function collectNoticePage(source:Source,page:number):Promise<{notices:Notice[];done:boolean}>{
  sourceFor(source);if(!Number.isSafeInteger(page)||page<1)throw new Error('Invalid archive page');
- const u=new URL(source.url);u.searchParams.set(source.kind==='university'?'pageNum':'num',String(page));
+ const u=new URL(source.kind==='cms'||source.kind==='legacy'?legacyNoticePageUrl(source,page):source.url);if(source.kind==='university'||source.kind==='computing')u.searchParams.set(source.kind==='university'?'pageNum':'num',String(page));
  const response=await sourceBytes(u.href);const input=new TextDecoder('utf-8',{fatal:true}).decode(response.bytes);
- if(source.kind==='computing'){if(!response.type.includes('text/html'))throw new Error('Expected archive HTML');return parseNoticePage(input,source,page);}
+ if(source.kind!=='university'){if(!response.type.includes('text/html'))throw new Error('Expected archive HTML');return parseNoticePage(input,source,page);}
  if(!response.type.includes('json'))throw new Error('Expected archive JSON');const data=JSON.parse(input);const notices=parseUniversity(data,source,page);
  const total=data.data.total;if(!Number.isSafeInteger(total)||page>Math.max(1,Math.ceil(total/50)))throw new Error('Invalid archive total/page');
  return {notices,done:page*50>=total};
@@ -76,6 +79,7 @@ function hydration(input:string):{value:(token:string)=>unknown;object:(name:str
 }
 export function parseNoticeRaw(input:string|unknown,notice:Notice):NoticeRaw {
  const source=identity(notice);
+ if(source.kind==='cms'||source.kind==='legacy'){if(typeof input!=='string')throw new Error('Expected legacy archive HTML');return {notice,...parseLegacyNoticeRaw(input,source,notice)};}
  if(source.kind==='university'){
   const response=input as {statusCode?:unknown;data?:Record<string,unknown>};const d=response?.data;
   if(response?.statusCode!==200||!d||String(d.pkId)!==notice.id||d.configPkId!==2||typeof d.content!=='string'||typeof d.title!=='string'||d.title.trim()!==notice.title||typeof d.regDate!=='string'||!/^(?:\d{14}|\d{4}-\d{2}-\d{2}.*)$/.test(d.regDate))throw new Error('Wrong university archive detail');

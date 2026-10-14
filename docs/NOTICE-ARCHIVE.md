@@ -3,7 +3,7 @@
 ## Approved scope
 
 - Keep the project's Node/GitHub Actions → Worker architecture. University HTTPS remains Node-side with the verified, scoped intermediate certificate.
-- Archive all six current notice boards: original article-body HTML, attachment links and image links. Do **not** download attachment/image binaries or recover posts already removed from the official site.
+- Support all eleven catalogued notice boards: original article-body HTML, attachment links and image links. The five added SW education, convergence education and big-data boards have been checked locally only; their rollout and historical start require separate approval. Do **not** download attachment/image binaries or recover posts already removed from the official site.
 - Use the **existing D1 database only** for original article content, searchable metadata, raw indexes and resumable progress. R2 is no longer required: there is no bucket, new storage service or Cloudflare card-registration step for this archive.
 - Separate source data from future derived results. This phase makes **no notice OpenRouter calls** and creates no fake processed objects.
 - Keep existing recent title/link notifications. Historical imports must not create alerts or reset live baselines.
@@ -48,7 +48,7 @@ After separate operating approval:
 2. Set Worker `[vars]` `NOTICE_ARCHIVE_ENABLED = "true"`, then deploy. The route requires this flag, the existing `DB` binding and a valid shared secret; do not enable it before the tables exist.
 3. Push reviewed code after approval. Keep existing Actions variable `NOTICE_INGEST_URL` and secret `NOTICE_INGEST_SECRET`; no Cloudflare account API token is given to Actions. Set Actions variable `NOTICE_ARCHIVE_ENABLED=true`.
 4. Manually run **collect notices** first. It attempts missing recent raw captures and sends the existing metadata snapshots. Raw-capture failure reports an incomplete run but does not prevent submission of successfully collected live metadata. Check raw-capture outcomes as well as accepted snapshot counts; HTTP202 for a snapshot does not prove its raw body was archived. The initial capture may take longer, and saved articles are reused after partial failures.
-5. Set Actions variable `NOTICE_BACKFILL_ENABLED=true`. Run **backfill notice archive** with its `start` input checked **once**. `start` inserts absent page-1 cursors and never resets existing or completed progress. Scheduled runs do not auto-start a backfill.
+5. Set Actions variable `NOTICE_BACKFILL_ENABLED=true`. Run **backfill notice archive** with its `start` input checked **once**. `start` inserts absent page-1 cursors and never resets existing or completed progress. This also initializes the five newly added boards after their rollout is approved; existing six-board progress is preserved. Scheduled runs do not auto-start a backfill.
 6. Inspect Actions source/page logs, database size, stored raw rows and D1 progress:
 
    ```sql
