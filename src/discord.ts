@@ -1,4 +1,5 @@
 import type { Env, Notice } from './types';
+import {NOTICE_GROUPS} from './notice-channels.ts';
 
 const API = 'https://discord.com/api/v10';
 const MANAGE_GUILD = 32n;
@@ -203,7 +204,8 @@ export const COMMANDS = [
   { name: 'notices', description: '최근 서강대학교 공지', options: [{ name: 'source', description: '게시판 ID (생략하면 전체)', type: 3 }] },
   { name: 'schedule', description: '앞으로 30일 공식 학사 일정' },
   { name: 'setup', description: '서버별 알림 채널 설정', default_member_permissions: '32', options: [
-    { name: 'notices', description: '공지 발송 채널', type: 7, channel_types: [0, 5] },
+    { name: 'notices', description: '기관별 채널 미설정 시 사용할 공지 채널', type: 7, channel_types: [0, 5] },
+    ...NOTICE_GROUPS.map(group=>({name:group.id,description:`${group.name} 공지 발송 채널`,type:7,channel_types:[0,5]})),
     { name: 'meals', description: '식단 발송 채널', type: 7, channel_types: [0, 5] },
     { name: 'schedule', description: '학사 일정 발송 채널', type: 7, channel_types: [0, 5] },
   ] },

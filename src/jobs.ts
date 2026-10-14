@@ -1,5 +1,6 @@
 import type { Env, Job, Notice, MealWeek, Schedule } from './types';
 import { SOURCES, collectNotices, discoverMealSources, fetchImage } from './sources';
+import {NOTICE_CHANNEL_COLUMNS,noticeChannelColumn} from './notice-channels';
 import { formatMeal, formatMealPart, type MealPeriod } from './meals';
 import { discordSend, allowedGuild, type DiscordMessageInput, type DiscordImageFile } from './discord';
 import {batchNoticeCards,noticeCardMessage} from './notice-card';
@@ -8,7 +9,7 @@ import {boardHash,cleanupMealMessage,updateBoard} from './message-board';
 import {mealCard} from './meal-card';
 import { validateSchedules } from './schedule';
 import { updateScheduleSummary } from './schedule-summary';
-import { claim, deliveryIntent, dispatch, enqueue, nowIso, recover, retryJob, saveNotices, sourceFailure } from './storage';
+import { claim, deliveryIntent, deliveryIntentStatements, dispatch, enqueue, nowIso, recover, retryJob, saveNotices, sourceFailure } from './storage';
 import {cacheMealSources,mealImageSource,mealWindow,pruneMealContent} from './meal-cache';
 export async function getSchedules(env:Env):Promise<Schedule[]> {
  const rows=await env.DB.prepare('SELECT data,active FROM schedules').all<{data:string;active:number}>();
@@ -140,8 +141,32 @@ export async function executeJob(env:Env,job:Job) {
  case 'notice-alert': {
  // Avoid catch-up floods from jobs older than a day. Still retain notices for queries.
  if(Date.now()-Date.parse(job.created_at)>86400_000) break;
- const chunks=batchNoticeCards(payload.notices as Notice[]);
- for(const g of await recipients(env,'notices_channel')) for(let i=0;i<chunks.length;i++) await deliveryIntent(env,`${job.id}:${g.id}:${i}`,g.id,g.channel,chunks[i].content,new Date(Date.parse(job.created_at)+86400_000).toISOString(),undefined,undefined,chunks[i].noticeCard);
+ const columns=Object.values(NOTICE_CHANNEL_COLUMNS);
+ const guilds=await env.DB.prepare(`SELECT id,notices_channel,${columns.join(',')} FROM guilds`).all<{id:string;notices_channel:string|null}&Record<typeof columns[number],string|null>>();
+ for(const g of guilds.results){
+  if(!allowedGuild(g.id,env))continue;
+  const prefix=`${job.id}:${g.id}:`;
+  // A committed plan freezes destinations, including uncertain/legacy sends, across setup changes.
+  const existing=await env.DB.prepare('SELECT COUNT(*) AS count FROM deliveries WHERE guild_id=? AND substr(id,1,?)=?').bind(g.id,prefix.length,prefix).first<{count:number}>();
+  if(existing?.count){
+   // Older versions committed chunks separately. Never silently complete a partial legacy plan,
+   // or guess new destinations for its missing chunks after an operator changes setup.
+   if(existing.count<batchNoticeCards(payload.notices as Notice[]).length)await env.DB.prepare("UPDATE jobs SET state='needs_review',lease_until=NULL,error='Incomplete existing notice delivery plan; operator review required' WHERE id=? AND state='running'").bind(job.id).run();
+   continue;
+  }
+  const destinations=new Map<string,Notice[]>();
+  for(const notice of payload.notices as Notice[]){
+   const column=noticeChannelColumn(notice.source),channel=(column?g[column]:null)??g.notices_channel;
+   if(!channel)continue;
+   const notices=destinations.get(channel)??[];notices.push(notice);destinations.set(channel,notices);
+  }
+  const statements: D1PreparedStatement[]=[];let index=0;
+  for(const [channel,notices] of destinations)for(const chunk of batchNoticeCards(notices)){
+   statements.push(...deliveryIntentStatements(env,`${prefix}${index++}`,g.id,channel,chunk.content,new Date(Date.parse(job.created_at)+86400_000).toISOString(),undefined,undefined,chunk.noticeCard));
+  }
+  // All destinations commit together; a partial failure must not leave a half-frozen plan.
+  if(statements.length)await env.DB.batch(statements);
+ }
  break;
  }
  case 'meal-discover': {

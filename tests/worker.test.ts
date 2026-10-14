@@ -17,6 +17,66 @@ async function signed(env:any,body:any) {
  return new Request('https://bot.test/interactions',{method:'POST',body:text,headers:{'x-signature-ed25519':signature,'x-signature-timestamp':ts}});
 }
 const interaction=(name:string,guild='111',permissions='32')=>({id:'123',application_id:'777',token:'secret-webhook',type:2,guild_id:guild,member:{permissions,user:{id:'private-user'}},data:{name}});
+describe('institution notice channel setup',()=>{
+ const channels={university:'1559799050054799433',computing:'1559799078798495805',swedu:'1559799123903909908',convedu:'1559799151942959115',bdata:'1559799178136264754'};
+ function discordApi(rejected?:string){
+  return vi.spyOn(globalThis,'fetch').mockImplementation(async(input,init)=>{
+   const url=String(input);
+   if(init?.method==='PATCH')return Response.json({});
+   if(url.includes('/channels/'))return Response.json({guild_id:url.endsWith('/'+rejected)?'222':'111',type:0,permission_overwrites:[]});
+   if(url.endsWith('/users/@me'))return Response.json({id:'999'});
+   if(url.endsWith('/guilds/111/members/999'))return Response.json({roles:[]});
+   if(url.endsWith('/guilds/111/roles'))return Response.json([{id:'111',permissions:'3072'}]);
+   throw new Error('Unexpected fixture endpoint');
+  });
+ }
+ const setup=(options:Record<string,string>)=>({...interaction('setup'),data:{name:'setup',options:Object.entries(options).map(([name,value])=>({name,value}))}});
+ it('privately configures all five supplied channels without creating deliveries or changing baselines',async()=>{
+  const db=testDatabase();try{
+   db.env.DISCORD_TOKEN='fixture';const api=discordApi();
+   await saveNotices(db.env,'university',[],new Date().toISOString());
+   const before=db.sqlite.prepare('SELECT * FROM sources').all();
+   const response=await handleRequest(await signed(db.env,setup(channels)),db.env);
+   expect(await response.json()).toEqual({type:5,data:{flags:64}});
+   await completeInteraction(db.env,db.sqlite.prepare("SELECT * FROM jobs WHERE id='interaction:123'").get() as any);
+   const guild=db.sqlite.prepare("SELECT * FROM guilds WHERE id='111'").get()!;
+   for(const [key,value]of Object.entries(channels))expect(guild[key+'_channel']).toBe(value);
+   expect(guild.notices_channel).toBeNull();expect(guild.meals_channel).toBeNull();expect(guild.schedule_channel).toBeNull();
+   expect(db.sqlite.prepare('SELECT * FROM sources').all()).toEqual(before);
+   expect(db.sqlite.prepare('SELECT COUNT(*) n FROM deliveries').get()!.n).toBe(0);
+   const patch=api.mock.calls.find(([,init])=>init?.method==='PATCH')!;
+   expect(JSON.parse(patch[1]!.body as string)).toMatchObject({allowed_mentions:{parse:[]}});
+  }finally{db.close();}
+ });
+ it('preserves omitted institution, fallback, meal and schedule settings',async()=>{
+  const db=testDatabase();try{
+   db.env.DISCORD_TOKEN='fixture';discordApi();
+   db.sqlite.exec("INSERT INTO guilds(id,notices_channel,meals_channel,schedule_channel,computing_channel,updated_at) VALUES('111','100','200','300','400','before')");
+   await completeInteraction(db.env,{payload:JSON.stringify({interaction:setup({university:channels.university}),expires:Date.now()+60000})} as any);
+   expect(db.sqlite.prepare("SELECT * FROM guilds WHERE id='111'").get()).toMatchObject({notices_channel:'100',meals_channel:'200',schedule_channel:'300',computing_channel:'400',university_channel:channels.university});
+  }finally{db.close();}
+ });
+ it.each([false,true])('validates every supplied channel before writes (existing guild: %s)',async(existing)=>{
+  const db=testDatabase();try{
+   db.env.DISCORD_TOKEN='fixture';const api=discordApi(channels.bdata);
+   if(existing)db.sqlite.exec("INSERT INTO guilds(id,notices_channel,updated_at) VALUES('111','100','before')");
+   const before=db.sqlite.prepare('SELECT * FROM guilds').all();
+   await completeInteraction(db.env,{payload:JSON.stringify({interaction:setup(channels),expires:Date.now()+60000})} as any);
+   expect(db.sqlite.prepare('SELECT * FROM guilds').all()).toEqual(before);
+   const patch=api.mock.calls.find(([,init])=>init?.method==='PATCH')!;
+   expect(JSON.parse(patch[1]!.body as string).content).toContain('이 서버에 속한 채널');
+  }finally{db.close();}
+ });
+ it.each(['unexpected','toString','__proto__'])('rejects unknown setup option %s without writes',async(key)=>{
+  const db=testDatabase();try{
+   const api=discordApi();
+   await completeInteraction(db.env,{payload:JSON.stringify({interaction:setup({[key]:'123'}),expires:Date.now()+60000})} as any);
+   expect(db.sqlite.prepare('SELECT COUNT(*) n FROM guilds').get()!.n).toBe(0);
+   expect(api).toHaveBeenCalledTimes(1);expect(api.mock.calls[0][1]!.method).toBe('PATCH');
+   expect(JSON.parse(api.mock.calls[0][1]!.body as string).content).toBe('잘못된 채널 설정입니다.');
+  }finally{db.close();}
+ });
+});
 describe('interaction and durable integration',()=>{
  it('records Cron planning and creates first collection jobs without awaiting a six-hour interval',async()=>{
   const db=testDatabase();try {

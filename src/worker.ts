@@ -9,6 +9,8 @@ import {handleNoticeIngest} from './notice-ingest';
 import {handleNoticeArchive} from './notice-archive';
 import {handleMealOcr} from './meal-ocr';
 import {operationalStatus} from './status';
+import {NOTICE_CHANNEL_COLUMNS} from './notice-channels';
+const SETUP_CHANNEL_COLUMNS:Record<string,string>={notices:'notices_channel',meals:'meals_channel',schedule:'schedule_channel',...NOTICE_CHANNEL_COLUMNS};
 interface Interaction {id:string;application_id:string;token:string;type:number;guild_id?:string;member?:{permissions?:string};data?:{name:string;options?:{name:string;value:string}[]}}
 function reply(content:string,ephemeral=true) {return Response.json({type:4,data:{...message(content),...(ephemeral?{flags:64}:{})}});}
 export async function handleRequest(request:Request,env:Env):Promise<Response> {
@@ -58,15 +60,15 @@ async function commandContent(env:Env,i:Interaction):Promise<DiscordMessageInput
  }
  case 'setup': {
  if(!authorized(i,env)) return '서버 관리 권한이 필요합니다.';
- if(!Object.keys(options).length) return '채널 옵션 notices, meals, schedule 중 하나 이상을 지정하세요.';
+ if(!Object.keys(options).length) return '채널 옵션 notices, university, computing, swedu, convedu, bdata, meals, schedule 중 하나 이상을 지정하세요.';
  for(const [key,value] of Object.entries(options)){
- if(!['notices','meals','schedule'].includes(key)) return '잘못된 채널 설정입니다.';
+ if(!Object.hasOwn(SETUP_CHANNEL_COLUMNS,key)) return '잘못된 채널 설정입니다.';
  try{await validateChannel(env,i.guild_id!,value);}catch(error){return error instanceof Error?error.message:'채널 권한 확인 실패';}
  }
  await env.DB.prepare('INSERT OR IGNORE INTO guilds(id,updated_at) VALUES(?,?)').bind(i.guild_id!,nowIso()).run();
- const statements=Object.entries(options).map(([key,value])=>env.DB.prepare(`UPDATE guilds SET ${key==='notices'?'notices':key==='meals'?'meals':'schedule'}_channel=?,updated_at=? WHERE id=?`).bind(value,nowIso(),i.guild_id!));
+ const statements=Object.entries(options).map(([key,value])=>env.DB.prepare(`UPDATE guilds SET ${SETUP_CHANNEL_COLUMNS[key]}=?,updated_at=? WHERE id=?`).bind(value,nowIso(),i.guild_id!));
  await env.DB.batch(statements);
- return '채널을 연결했습니다. 공지 첫 수집은 과거 글을 발송하지 않습니다. 식단·학사 일정 알림은 지정한 일일 시간대에만 발송합니다.';
+ return '채널을 연결했습니다. 기관별 공지는 지정한 전용 채널로만 보내며, 미설정 기관은 notices 채널을 사용합니다. 과거 공지를 재발송하거나 수집 기준을 초기화하지 않습니다. 식단·학사 일정 알림은 지정한 일일 시간대에만 발송합니다.';
  }
  case 'status': {
  if(!authorized(i,env)) return '서버 관리 권한이 필요합니다.';

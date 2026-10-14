@@ -75,7 +75,27 @@ unset DISCORD_TOKEN
 
 등록 PUT은 해당 scope의 **전체 명령 목록을 교체**합니다. 자동 등록/자동 배포 CI는 없습니다. 네트워크 실패 시 결과를 확인한 뒤 재실행하세요.
 
-관리자가 Discord에서 `/setup notices:#공지 meals:#식단 schedule:#학사일정` 실행. 옵션 일부만 지정하면 기존 다른 채널을 유지합니다. `/status`는 해당 서버 설정/발송과 공유 수집·작업·예산 상태를 비공개로 표시합니다. 조회 source 값은 `university`, `academicNotice`, `graduateNotice`, `externalInfo`, `news`, `career`.
+관리자가 Discord에서 `/setup notices:#공지 meals:#식단 schedule:#학사일정` 실행. 옵션 일부만 지정하면 기존 다른 채널을 유지합니다. `/status`는 해당 서버 설정/발송과 공유 수집·작업·예산 상태를 비공개로 표시합니다.
+
+### 기관별 공지 채널
+
+기관별 설정은 추가 migration **0010_notice_channels.sql**, Worker 배포와 Discord 명령 재등록이 필요합니다. **현재 로컬 구현이며 원격 migration·배포·명령 등록·실제 채널 설정은 별도 승인 전 실행하지 않습니다.** 미적용 migration 0009가 있는 환경에서는 일괄 migration 적용이 공지 원문 chunk 저장 변경까지 포함할 수 있으므로 별도 승인 범위를 확인해야 합니다.
+
+```text
+/setup university:#서강대학교 computing:#소프트웨어융합대학 swedu:#sw중심대학사업단 convedu:#융합교육원 bdata:#빅데이터융복합사업단
+```
+
+| setup 옵션 | 기관 | 조회 가능한 source ID |
+|---|---|---|
+| `university` | 서강대학교 (현재 학사공지) | `university` |
+| `computing` | 소프트웨어융합대학 | `academicNotice`, `graduateNotice`, `externalInfo`, `news`, `career` |
+| `swedu` | SW중심대학사업단 | `sweduNotice`, `sweduNews`, `sweduPress` |
+| `convedu` | 융합교육원 | `conveduNotice` |
+| `bdata` | 빅데이터 융복합 인재양성사업단 | `bdataNotice` |
+
+기관별 채널이 있으면 해당 채널로만 보내고 기존 `notices` 채널에는 중복 발송하지 않습니다. 미설정 기관은 `notices` 채널을 사용하며, 둘 다 없으면 그 기관 공지는 자동 발송하지 않습니다. 기관별 옵션만 지정해도 됩니다. 모든 지정 채널은 같은 서버 소속과 봇의 채널 보기·메시지 보내기 권한을 검증합니다. 채널 ID는 코드에 하드코딩하지 않고 서버별 DB 설정으로 저장합니다.
+
+설정 변경은 생략한 옵션·식단·일정 설정·공지 수집 기록·초기 기준을 유지하며 과거 공지를 재발송하지 않습니다. 이미 생성된 발송 intent는 기존 채널/내용/불확실 상태를 유지하고, 새 intent부터 새 설정을 사용합니다. 이전 버전이 여러 조각 중 일부만 저장한 기존 공지 작업은 누락분의 채널을 추측하거나 기존 발송을 재시도하지 않고 `needs_review`로 남깁니다. `/notices source:게시판ID` 조회와 공지 수집·보관 범위는 채널 분리와 별개입니다.
 
 ## 3. Cloudflare 준비와 배포
 

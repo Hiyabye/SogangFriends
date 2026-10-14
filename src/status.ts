@@ -1,10 +1,11 @@
 import type { Env } from './types';
 import type { DiscordMessageInput } from './discord';
 import { todayKst } from './time';
+import {NOTICE_CHANNEL_COLUMNS} from './notice-channels';
 
 /** Reviews annotate history, never rewrite execution outcomes or authorize retries. */
 export async function operationalStatus(env: Env, guildId: string): Promise<DiscordMessageInput> {
- const guild=await env.DB.prepare('SELECT notices_channel,meals_channel,schedule_channel FROM guilds WHERE id=?').bind(guildId).first();
+ const guild=await env.DB.prepare(`SELECT notices_channel,meals_channel,schedule_channel,${Object.values(NOTICE_CHANNEL_COLUMNS).join(',')} FROM guilds WHERE id=?`).bind(guildId).first();
  const sources=await env.DB.prepare('SELECT id,last_success,last_attempt,error FROM sources ORDER BY id').all();
  const health=await env.DB.prepare('SELECT id,last_attempt,last_success,error FROM health ORDER BY id').all();
  const jobs=await env.DB.prepare(`SELECT j.kind,j.state,

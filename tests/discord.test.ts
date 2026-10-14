@@ -65,6 +65,14 @@ describe('Discord message safety', () => {
     for (const notice of notices) expect(batches.join('\n')).toContain(notice.url);
     expect(batchNotices([])).toEqual([]);
   });
+  it('offers optional institution channels while retaining existing setup options',()=>{
+    const setup=COMMANDS.find(c=>c.name==='setup')!;
+    expect(setup.options!.map(option=>option.name)).toEqual(['notices','university','computing','swedu','convedu','bdata','meals','schedule']);
+    for(const option of setup.options!){
+      expect(option).toMatchObject({type:7,channel_types:[0,5]});
+      expect(option).not.toHaveProperty('required',true);
+    }
+  });
   it('restricts management commands at registration too', () => {
     expect(COMMANDS.find(c => c.name === 'setup')?.default_member_permissions).toBe('32');
     expect(COMMANDS.find(c => c.name === 'status')?.default_member_permissions).toBe('32');
