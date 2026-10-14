@@ -1,6 +1,7 @@
 import {afterEach,describe,expect,it,vi} from 'vitest';
 import {ADDITIONAL_NOTICE_SOURCES,noticeDetailUrl,legacyNoticePageUrl,parseLegacyNoticePage} from '../src/legacy-notice-sources';
-import {parseNoticePage,parseNoticeRaw} from '../src/notice-archive-sources';
+import {parseNoticePage,parseNoticeRaw,collectNoticeRaw} from '../src/notice-archive-sources';
+import {sourceBytes} from '../src/sources';
 import {validateNoticeSnapshot} from '../src/notice-ingest';
 import {saveNotices} from '../src/storage';
 import {testDatabase} from './helpers/db';
@@ -53,6 +54,18 @@ describe('additional official notice boards',()=>{
   expect(()=>parseNoticeRaw(html.replace('Notice 900','Changed title'),n)).toThrow('title');
   expect(()=>parseNoticeRaw(html.replace('2026.10.09','2026.10.08'),n)).toThrow('date');
   expect(()=>parseNoticeRaw(html,{...n,url:n.url+'&extra=1'})).toThrow('URL');
+ });
+ it('retains oversized inline-image original HTML only through the bounded archive detail transport',async()=>{
+  vi.useFakeTimers();
+  const s=ADDITIONAL_NOTICE_SOURCES[0],notice=parseNoticePage(page(s),s,1).notices.find(n=>n.id==='900')!;
+  const image=`<img src="data:image/png;base64,${'A'.repeat(3_800_000)}">`;
+  const html=detail(s).replace('<p data-original="yes">Body &amp; content</p>',image);
+  vi.stubGlobal('fetch',vi.fn(async()=>new Response(html,{headers:{'content-type':'text/html'}})));
+  const pending=collectNoticeRaw(notice);await vi.runAllTimersAsync();
+  expect((await pending).bodyHtml).toContain(image);
+  const ordinary=expect(sourceBytes(notice.url)).rejects.toThrow('Source too large');await vi.runAllTimersAsync();await ordinary;
+  vi.stubGlobal('fetch',vi.fn(async()=>new Response('bounded',{headers:{'content-type':'text/html','content-length':String(9*1024*1024+1)}})));
+  const oversized=expect(collectNoticeRaw(notice)).rejects.toThrow('Source too large');await vi.runAllTimersAsync();await oversized;
  });
  it('keeps each new live baseline silent and independent of existing source health',async()=>{
   const db=testDatabase();try{db.sqlite.prepare("INSERT INTO sources(id,initialized,last_success) VALUES('university',1,'last-good')").run();for(const s of ADDITIONAL_NOTICE_SOURCES){const notices=parseNoticePage(page(s),s,1).notices;await saveNotices(db.env,s.id,notices,'2026-10-09T00:00:00Z');expect(db.sqlite.prepare('SELECT initialized FROM sources WHERE id=?').get(s.id)!.initialized).toBe(1);await saveNotices(db.env,s.id,notices,'2026-10-09T01:00:00Z');}expect(db.sqlite.prepare("SELECT COUNT(*) AS n FROM jobs WHERE kind='notice-alert'").get()!.n).toBe(0);expect(db.sqlite.prepare("SELECT last_success FROM sources WHERE id='university'").get()!.last_success).toBe('last-good');}finally{db.close();}

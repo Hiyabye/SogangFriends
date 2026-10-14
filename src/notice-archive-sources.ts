@@ -2,6 +2,7 @@ import {parse,type DefaultTreeAdapterMap} from 'parse5';
 import {SOURCES,sourceBytes,parseUniversity,parseComputing} from './sources.ts';
 import type {Notice,Source} from './types';
 import {validDate} from './time.ts';
+import {ARCHIVE_MAX_BODY_BYTES} from './notice-archive-limits.ts';
 import {noticeDetailUrl,legacyNoticePageUrl,parseLegacyNoticePage,parseLegacyNoticeRaw} from './legacy-notice-sources.ts';
 
 type Node=DefaultTreeAdapterMap['node'];
@@ -110,7 +111,8 @@ export function parseNoticeRaw(input:string|unknown,notice:Notice):NoticeRaw {
 }
 export async function collectNoticeRaw(notice:Notice):Promise<NoticeRaw>{
  const source=identity(notice);const url=source.kind==='university'?`https://www.sogang.ac.kr/api/api/v1/mainKo/BbsData?pkId=${notice.id}`:notice.url;
- const response=await sourceBytes(url);const input=new TextDecoder('utf-8',{fatal:true}).decode(response.bytes);
+ // Allow bounded page/API wrapper overhead beyond the retained original HTML.
+ const response=await sourceBytes(url,ARCHIVE_MAX_BODY_BYTES+1024*1024);const input=new TextDecoder('utf-8',{fatal:true}).decode(response.bytes);
  if(!response.type.includes(source.kind==='university'?'json':'text/html'))throw new Error('Unexpected archive detail content type');
  return parseNoticeRaw(source.kind==='university'?JSON.parse(input):input,notice);
 }

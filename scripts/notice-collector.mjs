@@ -3,7 +3,7 @@ import {readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {rootCertificates} from 'node:tls';
-import {SOURCES,collectNotices} from '../src/sources.ts';
+import {SOURCES,collectNotices,SourceHttpError} from '../src/sources.ts';
 
 export const CERTIFICATE_URL=new URL('../certificates/sogang-ov-r36.pem',import.meta.url);
 export const CERTIFICATE_FINGERPRINT='6542D176BED50F193C0CE297AE44ECD8A0A86BEC2EDE682769344059B4E78530';
@@ -60,6 +60,16 @@ export async function sendSnapshot(endpoint,snapshot,{fetcher=fetch,sleep=delay,
   await sleep(retryDelay(response,attempt,now()));
  }
 }
+// Whitelist classifications only: arbitrary exception messages can contain source bodies or secrets.
+export function collectionFailure(error) {
+ if(error instanceof SourceHttpError&&Number.isInteger(error.status)&&error.status>=100&&error.status<=599)return `source-http-${error.status}`;
+ if(error instanceof Error){
+  if(error.message==='Source too large')return 'source-size-limit';
+  if(error.name==='AbortError'||error.name==='TimeoutError')return 'source-timeout';
+  if(error.message==='Raw capture incomplete')return 'raw-incomplete';
+ }
+ return 'unclassified';
+}
 export async function runCollector({send=false,endpoint,secret,collect=collectNotices,sources=SOURCES,upload=sendSnapshot,log=console.log,archiveEnabled=false,capture}={}) {
  verifyCertificate();
  if(send){validateEndpoint(endpoint);if(typeof secret!=='string'||secret.length<32)throw new Error('NOTICE_INGEST_SECRET must contain at least 32 characters');}
@@ -78,13 +88,13 @@ export async function runCollector({send=false,endpoint,secret,collect=collectNo
    if(send){
     if(archiveEnabled){
      try{const result=await capture(source,notices);if(result?.complete!==true)throw new Error('Raw capture incomplete');}
-     catch{failed++;log(`${source.id}: raw capture incomplete; submitting live metadata independently`);}
+     catch(error){failed++;log(`${source.id}: raw capture incomplete; submitting live metadata independently (${collectionFailure(error)})`);}
     }
     stage='upload';await upload(endpoint,signedSnapshot(source.id,notices,secret));
    }
    log(`${source.id}: ${notices.length} notices ${send?'accepted':'collected (dry-run, not uploaded)'}`);
-  }catch{
-   failed++;log(`${source.id}: ${stage} failed; retained last-good stored data`);
+  }catch(error){
+   failed++;log(`${source.id}: ${stage} failed; retained last-good stored data (${collectionFailure(error)})`);
   }
  }
  return failed===0?0:1;

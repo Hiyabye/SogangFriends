@@ -1,7 +1,7 @@
 import {resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {SOURCES} from '../src/sources.ts';
-import {validateCollectorLaunch,validateEndpoint} from './notice-collector.mjs';
+import {validateCollectorLaunch,validateEndpoint,collectionFailure} from './notice-collector.mjs';
 import {createArchiveClient,captureRawNotices} from './notice-archive-client.mjs';
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 
@@ -47,16 +47,17 @@ export async function runBackfill({send=false,start=false,pages=send?6:1,client,
    return a.page-b.page||(selected.get(a.source)??-1)-(selected.get(b.source)??-1)||sources.findIndex(s=>s.id===a.source)-sources.findIndex(s=>s.id===b.source);
   });
   const cursor=active[0],source=sources.find(s=>s.id===cursor.source);selected.set(source.id,step);
+  let stage='list';
   try{
    await sleep(3000);const result=await collectPage(source,cursor.page);
    if(!Array.isArray(result.notices)||typeof result.done!=='boolean'||!result.notices.length&&!result.done)throw new Error('Invalid source page');
-   const capture=await captureRawNotices(source,result.notices,{client,collectRaw,sleep,paceMs:3000,beforeRecord:withinBudget,allowUnavailable:true});
+   stage='raw';const capture=await captureRawNotices(source,result.notices,{client,collectRaw,sleep,paceMs:3000,beforeRecord:withinBudget,allowUnavailable:true});
    if(!capture.complete){log(`${source.id}: paused within page ${cursor.page}; saved records retained, cursor unchanged`);break;}
-   const committed=await client({action:'commit',source:source.id,page:cursor.page,ids:result.notices.map(notice=>notice.id),done:result.done});
+   stage='commit';const committed=await client({action:'commit',source:source.id,page:cursor.page,ids:result.notices.map(notice=>notice.id),done:result.done});
    if(committed.committed!==true||!Number.isSafeInteger(committed.page)||committed.page<=cursor.page||!['active','done'].includes(committed.state))throw new Error('Invalid archive commit acknowledgement');
    log(`${source.id}: page ${cursor.page} committed, ${capture.captured} raw articles captured, ${capture.unavailable} definitively unavailable, state ${committed.state}`);
-  }catch{
-   failedSources.add(source.id);failures++;log(`${source.id}: backfill page ${cursor.page} failed; resume from durable cursor next run`);
+  }catch(error){
+   failedSources.add(source.id);failures++;log(`${source.id}: backfill page ${cursor.page} failed; resume from durable cursor next run (stage=${stage}, ${collectionFailure(error)})`);
   }
  }
  return failures?1:0;

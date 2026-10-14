@@ -3,7 +3,7 @@ import {SOURCES} from './sources';
 import {validateNoticeSnapshot,verifyCollectorRequest} from './notice-ingest';
 import {nowIso} from './storage';
 import {todayKst} from './time';
-const MAX_REQUEST=2*1024*1024,MAX_BODY=1024*1024;
+import {ARCHIVE_MAX_REQUEST_BYTES,ARCHIVE_MAX_BODY_BYTES,ARCHIVE_INLINE_BODY_BYTES,archiveBodyChunks} from './notice-archive-limits';
 interface RawNotice {notice:Notice;bodyHtml:string;attachments:string[];imageUrls:string[]}
 interface Progress {source:string;page:number;state:'active'|'done';updated_at:string;started_at:string}
 type ArchiveAction={action:'status'|'start'}|{action:'missing';source:string;ids:string[];includeUnavailable:boolean}|{action:'record';raw:RawNotice}|{action:'unavailable';notice:Notice;status:404|410}|{action:'commit';source:string;page:number;ids:string[];done:boolean};
@@ -19,12 +19,13 @@ function references(value:unknown):string[] {
 function validateRaw(value:unknown):RawNotice {
  const raw=object(value),n=object(raw.notice);
  const notice=validateNoticeSnapshot({source:n.source,notices:[n]}).notices[0];
- if(typeof raw.bodyHtml!=='string'||new TextEncoder().encode(raw.bodyHtml).length>MAX_BODY)throw new Error('Invalid raw body');
+ if(typeof raw.bodyHtml!=='string'||new TextEncoder().encode(raw.bodyHtml).length>ARCHIVE_MAX_BODY_BYTES)throw new Error('Invalid raw body');
  const validated={notice,bodyHtml:raw.bodyHtml,attachments:references(raw.attachments),imageUrls:references(raw.imageUrls)};
  // D1's row maximum is 2,000,000 bytes, not 2 MiB. Leave space for SQLite row headers,
  // identity/hash/timestamp columns; body HTML is stored as TEXT, not escaped JSON.
  const bytes=new TextEncoder();
- const rowBytes=bytes.encode(validated.bodyHtml).length+bytes.encode(JSON.stringify(notice)).length+bytes.encode(JSON.stringify(validated.attachments)).length+bytes.encode(JSON.stringify(validated.imageUrls)).length;
+ const bodyBytes=bytes.encode(validated.bodyHtml).length;
+ const rowBytes=(bodyBytes<=ARCHIVE_INLINE_BODY_BYTES?bodyBytes:0)+bytes.encode(JSON.stringify(notice)).length+bytes.encode(JSON.stringify(validated.attachments)).length+bytes.encode(JSON.stringify(validated.imageUrls)).length;
  if(rowBytes>1_900_000)throw new Error('Archive raw row exceeds D1 size limit');
  return validated;
 }
@@ -70,15 +71,22 @@ async function record(env:Env,raw:RawNotice):Promise<Response> {
  // Use supported D1 metadata, not unsupported database-size PRAGMAs.
  const size=lookup.meta.size_after;
  if(!Number.isFinite(size)||size<0||size>=400_000_000)return new Response('Archive capacity reached; live bot headroom preserved',{status:503});
- const at=nowIso(),contentHash=await hash(raw);
+ const at=nowIso(),contentHash=await hash(raw),bodyBytes=new TextEncoder().encode(raw.bodyHtml).length;
+ const chunks=bodyBytes>ARCHIVE_INLINE_BODY_BYTES?archiveBodyChunks(raw.bodyHtml):[];
  // The first committed row wins. Derive the index from that winning row, not this request,
  // so concurrent captures cannot pair one body with another request's hash/metadata.
  await env.DB.batch([
-  env.DB.prepare('INSERT OR IGNORE INTO notice_archive_raw(source,id,notice_json,body_html,attachments_json,image_urls_json,content_hash,captured_at) VALUES(?,?,?,?,?,?,?,?)').bind(notice.source,notice.id,JSON.stringify(notice),raw.bodyHtml,JSON.stringify(raw.attachments),JSON.stringify(raw.imageUrls),contentHash,at),
-  env.DB.prepare("INSERT OR IGNORE INTO notice_archive(source,id,title,published,url,raw_key,content_hash,captured_at) SELECT source,id,json_extract(notice_json,'$.title'),json_extract(notice_json,'$.published'),json_extract(notice_json,'$.url'),?,content_hash,captured_at FROM notice_archive_raw WHERE source=? AND id=?").bind(key,notice.source,notice.id)
+  env.DB.prepare('INSERT OR IGNORE INTO notice_archive_raw(source,id,notice_json,body_html,attachments_json,image_urls_json,content_hash,captured_at,body_storage,body_chunk_count,body_bytes) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(notice.source,notice.id,JSON.stringify(notice),chunks.length?'':raw.bodyHtml,JSON.stringify(raw.attachments),JSON.stringify(raw.imageUrls),contentHash,at,chunks.length?'chunked':'inline',chunks.length,bodyBytes),
+  // Only the winning capture may populate its chunks. A concurrent different body
+  // must never attach its bytes to that capture's metadata or hash.
+  ...chunks.map((chunk,ordinal)=>env.DB.prepare("INSERT OR IGNORE INTO notice_archive_raw_chunks(source,id,ordinal,body_html) SELECT source,id,?,? FROM notice_archive_raw WHERE source=? AND id=? AND content_hash=? AND body_storage='chunked'").bind(ordinal,chunk,notice.source,notice.id,contentHash)),
+  env.DB.prepare("INSERT OR IGNORE INTO notice_archive(source,id,title,published,url,raw_key,content_hash,captured_at) SELECT source,id,json_extract(notice_json,'$.title'),json_extract(notice_json,'$.published'),json_extract(notice_json,'$.url'),?,content_hash,captured_at FROM notice_archive_raw AS raw WHERE source=? AND id=? AND (body_storage='inline' OR (body_chunk_count=(SELECT COUNT(*) FROM notice_archive_raw_chunks AS chunk WHERE chunk.source=raw.source AND chunk.id=raw.id) AND body_bytes=(SELECT SUM(length(CAST(body_html AS BLOB))) FROM notice_archive_raw_chunks AS chunk WHERE chunk.source=raw.source AND chunk.id=raw.id)))").bind(key,notice.source,notice.id)
  ]);
+ // Never acknowledge an incomplete capture, even if a write was ignored.
+ const stored=await env.DB.prepare('SELECT raw_key FROM notice_archive WHERE source=? AND id=?').bind(notice.source,notice.id).first<{raw_key:string}>();
+ if(!stored)throw new Error('Incomplete archive capture');
  // Do not insert into notices here: a live snapshot must still see new IDs and create alerts.
- return Response.json({recorded:true,key});
+ return Response.json({recorded:true,key:stored.raw_key});
 }
 async function commit(env:Env,input:Extract<ArchiveAction,{action:'commit'}>):Promise<Response> {
  const progress=await env.DB.prepare('SELECT source,page,state,updated_at,started_at FROM notice_archive_progress WHERE source=?').bind(input.source).first<Progress>();
@@ -97,7 +105,7 @@ async function commit(env:Env,input:Extract<ArchiveAction,{action:'commit'}>):Pr
 }
 export async function handleNoticeArchive(request:Request,env:Env):Promise<Response> {
  if(env.NOTICE_ARCHIVE_ENABLED!=='true'||!env.NOTICE_INGEST_SECRET||env.NOTICE_INGEST_SECRET.length<32)return new Response('Notice archive disabled',{status:503});
- const verified=await verifyCollectorRequest(request,env.NOTICE_INGEST_SECRET,MAX_REQUEST);if(verified instanceof Response)return verified;
+ const verified=await verifyCollectorRequest(request,env.NOTICE_INGEST_SECRET,ARCHIVE_MAX_REQUEST_BYTES);if(verified instanceof Response)return verified;
  let input:ArchiveAction;
  try{input=action(JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(verified.body)));}catch{return new Response('Invalid archive payload',{status:400});}
  if(Math.abs(Date.now()-Number(verified.timestamp))>5*60_000)return new Response('Unauthorized',{status:401});

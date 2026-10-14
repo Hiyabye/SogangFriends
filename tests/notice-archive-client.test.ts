@@ -33,7 +33,7 @@ describe('archive transport and raw collection',()=>{
  it('caps transport attempts and request/acknowledgement sizes without leaking secrets',async()=>{
   const fetcher=vi.fn(async()=>{throw new Error(secret);});
   await expect(createArchiveClient({endpoint,secret,fetcher,sleep})({action:'status'})).rejects.toThrow('bounded retries');expect(fetcher).toHaveBeenCalledTimes(3);
-  await expect(createArchiveClient({endpoint,secret,fetcher,sleep})({body:'x'.repeat(2*1024*1024)})).rejects.toThrow('size limit');
+  await expect(createArchiveClient({endpoint,secret,fetcher,sleep})({body:'x'.repeat(16*1024*1024)})).rejects.toThrow('size limit');
   const large=vi.fn(async()=>json({body:'x'.repeat(64*1024)}));
   await expect(createArchiveClient({endpoint,secret,fetcher:large,sleep})({action:'status'})).rejects.toThrow('bounded retries');expect(large).toHaveBeenCalledTimes(3);
  });
@@ -124,7 +124,10 @@ describe('bounded resumable backfill',()=>{
  });
  it('never commits a failed detail/page and does not treat an exception as EOF',async()=>{
   const client=vi.fn(async(p:any)=>p.action==='status'?{sources:[{source:'university',page:4,state:'active'}]}:{missing:['1']});
-  expect(await runBackfill({send:true,pages:1,client,collectPage,collectRaw:async()=>{throw new Error(secret);},sleep,log:vi.fn()})).toBe(1);
+  const log=vi.fn();
+  expect(await runBackfill({send:true,pages:1,client,collectPage,collectRaw:async()=>{throw new Error(secret);},sleep,log})).toBe(1);
+  expect(log.mock.calls.flat().join('\n')).toContain('stage=raw, unclassified');
+  expect(log.mock.calls.flat().join('\n')).not.toContain(secret);
   expect(client.mock.calls.some(([p])=>p.action==='commit')).toBe(false);
   client.mockClear();
   expect(await runBackfill({send:true,pages:1,client,collectPage:async()=>{throw new Error('Malformed page');},collectRaw,sleep,log:vi.fn()})).toBe(1);
@@ -136,7 +139,9 @@ describe('bounded resumable backfill',()=>{
   const client=async(p:any)=>{actions.push(p);if(p.action==='status')return {sources:cursors.map(c=>({...c}))};if(p.action==='missing')return {missing:['1']};if(p.action==='record')return {recorded:true,key:`raw/${p.raw.notice.source}/1.json`};if(p.action==='commit'){const c=cursors.find(c=>c.source===p.source)!;c.page++;c.state='done';return {committed:true,page:c.page,state:c.state};}throw new Error('Unexpected action');};
   const read=async(s:any)=>({notices:[{...notice,source:s.id}],done:true});
   const detail=async(n:any)=>{if(n.source==='university')throw new SourceHttpError(503);return {...raw,notice:n};};
-  expect(await runBackfill({send:true,pages:6,client,sources,collectPage:read,collectRaw:detail,sleep,log:vi.fn()})).toBe(1);
+  const log=vi.fn();
+  expect(await runBackfill({send:true,pages:6,client,sources,collectPage:read,collectRaw:detail,sleep,log})).toBe(1);
+  expect(log.mock.calls.flat().join('\n')).toContain('stage=raw, source-http-503');
   expect(cursors).toEqual([{source:'university',page:1,state:'active'},{source:'academicNotice',page:2,state:'done'}]);
   expect(actions.filter(p=>p.action==='commit').map(p=>p.source)).toEqual(['academicNotice']);
   expect(actions.some(p=>p.action==='unavailable')).toBe(false);

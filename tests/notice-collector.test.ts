@@ -1,7 +1,7 @@
 import {describe,it,expect,vi} from 'vitest';
 import {createHmac} from 'node:crypto';
 import {readFileSync} from 'node:fs';
-import {verifyCertificate,validateEndpoint,signedSnapshot,sendSnapshot,runCollector,main,CERTIFICATE_URL,CERTIFICATE_FINGERPRINT} from '../scripts/notice-collector.mjs';
+import {verifyCertificate,validateEndpoint,signedSnapshot,sendSnapshot,runCollector,collectionFailure,main,CERTIFICATE_URL,CERTIFICATE_FINGERPRINT} from '../scripts/notice-collector.mjs';
 import {SOURCES} from '../src/sources';
 const endpoint='https://bot.example/internal/notices';
 const secret='fixture-secret-'.repeat(4);
@@ -9,6 +9,11 @@ const row={id:'1',source:'university',title:'검증용 공지 😀',published:'2
 const snapshot=()=>signedSnapshot('university',[row],secret,'1791561600000');
 
 describe('standalone authenticated notice collector',()=>{
+ it('classifies bounded source failures without echoing arbitrary exception text',()=>{
+  expect(collectionFailure(new Error('Source too large'))).toBe('source-size-limit');
+  expect(collectionFailure(new DOMException('private timeout details','AbortError'))).toBe('source-timeout');
+  expect(collectionFailure(new Error(`private body ${secret}`))).toBe('unclassified');
+ });
  it('pins the official CA fingerprint, verifies root signature and enforces validity',()=>{
   const cert=verifyCertificate();expect(cert.fingerprint256.replaceAll(':','')).toBe(CERTIFICATE_FINGERPRINT);expect(cert.ca).toBe(true);
   const pem=readFileSync(CERTIFICATE_URL);

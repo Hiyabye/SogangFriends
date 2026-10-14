@@ -1,6 +1,7 @@
 import {createHmac} from 'node:crypto';
 import {validateEndpoint} from './notice-collector.mjs';
 import {SourceHttpError} from '../src/sources.ts';
+import {ARCHIVE_MAX_REQUEST_BYTES} from '../src/notice-archive-limits.ts';
 const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 
 function retryDelay(response,attempt,now) {
@@ -27,7 +28,7 @@ export function createArchiveClient({endpoint,secret,fetcher=fetch,sleep=delay,n
  if(typeof secret!=='string'||secret.length<32)throw new Error('NOTICE_INGEST_SECRET must contain at least 32 characters');
  return async payload=>{
   const body=JSON.stringify(payload),timestamp=String(now());
-  if(Buffer.byteLength(body)>2*1024*1024)throw new Error('Archive request exceeds size limit');
+  if(Buffer.byteLength(body)>ARCHIVE_MAX_REQUEST_BYTES)throw new Error('Archive request exceeds size limit');
   const headers={'content-type':'application/json','x-collector-timestamp':timestamp,'x-collector-signature':createHmac('sha256',secret).update(`${timestamp}.${body}`).digest('hex')};
   for(let attempt=1;attempt<=3;attempt++){
    let response,result;
