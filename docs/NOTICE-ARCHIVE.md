@@ -26,7 +26,7 @@ The archive uses the **existing D1 database only**. Node/GitHub Actions fetch of
 
 Bodies up to 1 MiB stay inline. Larger bodies use ordered `notice_archive_raw_chunks` with metadata `body_storage='chunked'`, chunk count and byte count. Readers must concatenate by `ordinal`; original identity/hash remain unchanged. Metadata, chunks and index commit atomically. JSON escaping can exhaust the request limit before the body limit. Validated stored columns remain below **1,900,000 bytes per metadata row**, with bounded chunk rows below D1's **2,000,000-byte row ceiling**. Raw HTML is not copied into job payloads.
 
-D1 Free is limited to **500 MB per database**, shared with live bot data. New captures stop at a reported size of **400 MB**, or when size metadata is missing. Existing captures remain replayable. This guard is not a reservation: concurrent writes or the final capture may cross the threshold slightly. Full-history capacity and live Worker CPU/memory feasibility for oversized captures are unproven. Do not delete retained originals or independently delete indexes/progress to make space.
+D1 Free is limited to **500 MB per database**, shared with live bot data. New captures stop at a reported size of **400 MB**, or when size metadata is missing. Existing captures remain replayable. This guard is not a reservation: concurrent writes or the final capture may cross the threshold slightly. The2026-10-14 live verification stored four chunked originals up to3,837,519 bytes; their48 stored chunks matched metadata counts and byte totals. Full-history capacity and worst-case8MiB Worker CPU/memory feasibility remain unproven. Do not delete retained originals or independently delete indexes/progress to make space.
 
 ## Authentication and setup
 

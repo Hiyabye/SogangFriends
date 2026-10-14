@@ -65,6 +65,8 @@ Official weights may be cached under `~/.paddlex` / `~/.EasyOCR`; the venv, sour
 
 Activation and actual Linux/live-ingestion runs are recorded once in [VERIFICATION.md](../../docs/VERIFICATION.md). Retired inference trial details are historical evidence, not instructions to recreate those paths. Meal display-hash migration0011 was applied to production with explicit approval on2026-10-14. It concerns report deduplication only and does not alter OCR ingestion.
 
+The2026-10-14 verification-only Actions run passed both native engines/weight hashes and all39 Python tests. Current-week OCR passed via EasyOCR fallback, but another retained source failed the existing pre-OCR `unsupported_column_structure` guard, so the two-source batch correctly failed. No ingestion occurred. The geometry/run-batch algorithm was unchanged by the maintenance review; source-layout diagnosis remains follow-up work, not permission to relax validation.
+
 ## Diagnostic CLI and shared helpers
 
 `evaluate.py` is both a local crop/transcription diagnostic CLI **and a shared helper module imported by `pipeline.py`**. Do not remove it as unused legacy. Its CLI does not call model services, Discord, D1 or ingestion; it emits no serving meal-availability JSON and never retries historical jobs. OCR engines are imported only when selected.
