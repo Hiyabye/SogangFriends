@@ -18,7 +18,7 @@ The project-owned Node/GitHub Actions collector uses the shared `src/sources.ts`
 | `conveduNotice` | <https://convedu.sogang.ac.kr/front/cmsboardlist.do?siteId=convedu&bbsConfigFK=5551> |
 | `bdataNotice` | <https://sc.sogang.ac.kr/bdata/4305.html> |
 
-All eleven sources have initialized live baselines and stored production rows; five institution channels have confirmed manual Components V2 verification messages. That does not prove full history or subsequent automatic end-to-end delivery. Current production excludes main's pending oversized-original change; see [rollout evidence](VERIFICATION.md) and [archive limits](NOTICE-ARCHIVE.md#size-limits) before deployment or upload.
+All eleven sources have initialized live baselines and stored production rows; five institution channels have confirmed manual Components V2 verification messages. That does not prove full history or subsequent automatic end-to-end delivery. Current production includes the approved oversized-original change and migrations0009/0011; see [rollout evidence](VERIFICATION.md) and [archive limits](NOTICE-ARCHIVE.md#size-limits) for observed verification and remaining capacity limits.
 
 ```text
 Official sources → Node → HMAC /internal/notices → D1 snapshot job → Queue → Discord
@@ -47,7 +47,7 @@ No arguments also means dry-run. This performs **real read-only HTTPS requests**
 
 ## Upload configuration and approval
 
-Production is already configured; these are requirements for a new environment, not instructions to repeat activation. **Secret changes, Git push, deployment, workflow dispatch and uploads need approval.** Do not deploy current main wholesale: production build `45de078` deliberately excludes `9c90edd`/migration0009, and local0011 also awaits rollout.
+Production is already configured; these are requirements for a new environment, not instructions to repeat activation. **Secret changes, Git push, deployment, workflow dispatch and uploads need approval.** Production Worker `23c106c8-77c3-45de-b6a9-411c3070f54c` was deployed from main `a4ce2b6` after applying separately approved0009/0011. Future changes still require their own approval.
 
 1. Configure the **same** dedicated `NOTICE_INGEST_SECRET` in Worker and Actions, privately. Keep the existing D1/Queue/baselines. Do not paste secrets into chat, Git, command arguments or logs.
 2. Deploy the approved Worker/schema with `NOTICE_COLLECTION_MODE=external`. Raw capture additionally requires its own matching schema and flag; follow [NOTICE-ARCHIVE.md](NOTICE-ARCHIVE.md).

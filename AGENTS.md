@@ -92,7 +92,7 @@ The eleven boards map to five groups:
 - [Archive contract](docs/NOTICE-ARCHIVE.md): first retained raw capture, cumulative metadata, capacity guard and slow resumable backfill. Historical imports create no alerts and do not change live baselines/health. Preserve start-day protection so backfill cannot suppress fresh alerts.
 - Store original HTML and attachment/image **URLs**, no notice binary downloads. `raw/<source>/<id>.json` is a logical key, not a file. `processed/` is reserved; no fake derived outputs or notice models.
 - Free D1: 500 MB/database and 2,000,000 bytes/row. Validated raw row columns stay within 1,900,000 bytes. Stop new originals at 400 MB or missing size metadata; preserve captures/cursors. Full-history capacity and live oversized-request CPU/memory feasibility are unproven.
-- Main's pending0009 supports exact HTML up to 8 MiB, detail transport 9 MiB and signed archive JSON 16 MiB; rows above 1 MiB use ordinal chunks. Metadata/chunks/index commit atomically; readers concatenate ordinal order. Production remains on the smaller inline contract until separate rollout approval.
+- Deployed migration0009 supports exact HTML up to 8 MiB, detail transport 9 MiB and signed archive JSON 16 MiB; rows above 1 MiB use ordinal chunks. Metadata/chunks/index commit atomically; readers concatenate ordinal order. Migration0009 and the chunk-capable Worker were deployed with explicit approval on 2026-10-14; full-size live feasibility remains unproven.
 
 ## Meals and boards
 
@@ -101,7 +101,7 @@ The eleven boards map to five groups:
 - Retain meal source metadata, derived meals and rejected-result bodies only for **current+next KST Monday–Sunday weeks**. Preserve audit identity/provenance, jobs and all reservations. Notice retention is independent.
 - OCR refresh: **06:40 / 17:10 KST**. Morning report **07:00** = today's breakfast+dinner; evening **17:30** = today's dinner+tomorrow's breakfast. Separate slot IDs. Reports omit cup rice; `/meal` remains full-day. Ingestion creates no delivery jobs.
 - Bootstrap meal reports only within the current slot's 15-minute window; polling/ingestion cannot bootstrap. Existing boards poll every 15 minutes. Do not replay missed, failed or uncertain historical posts.
-- Changed meal display: POST replacement → atomically persist new message tracking + cleanup job → DELETE only the previously tracked message. Cleanup retries independently, never by reposting. Unchanged rendered content must be silent even when image preparation is retrying. Keep intended `content_hash` separate from confirmed `display_hash` (local migration0011).
+- Changed meal display: POST replacement → atomically persist new message tracking + cleanup job → DELETE only the previously tracked message. Cleanup retries independently, never by reposting. Unchanged rendered content must be silent even when image preparation is retrying. Keep intended `content_hash` separate from confirmed `display_hash` (deployed migration0011).
 - Components V2 meal containers contain source links and the exact plain text caution **outside/below all cards**: `OCR 판독 결과로 메뉴명에 오탈자가 있을 수 있습니다. 미확인 항목은 원문을 확인하세요.` No mentions.
 - When selected offerings are all unknown/missing, attach the matching-week official PNG/JPEG, not an external-image embed. Enforce verified TLS and combined 5 MiB transient files; deduplicate same-week images and support Sunday→Monday two-week reports. Out-of-window/missing sources remain dated links, never a stale image labelled current.
 - Recheck date/slot/configuration after downloads. Morning reports expire at 17:30, evening at midnight KST. Legacy delivery payloads without date metadata remain text/link-only.
@@ -132,8 +132,8 @@ The eleven boards map to five groups:
 
 ## Current deployment boundary — do not bypass
 
-- Verified production Worker: **`010e9653-ee6c-443c-ba2f-47ccac4c0cbb`**, built from isolated **`45de078`** = prior production `7853457` + channel feature `fb7f4f7`, excluding oversized-original change `9c90edd`.
-- Production has migrations0001–0008 and0010. **0009 is NOT applied.** Main's oversized-original implementation and the current cleanup/state fixes are local only. **0011 is approved for local implementation, NOT remote application/deployment.**
-- Do not run a generic remote migration apply or deploy current main under the prior channel-only approval. Inspect the full pending set, obtain separate approval and keep schema/code compatible.
+- Verified production Worker: **`23c106c8-77c3-45de-b6a9-411c3070f54c`**, deployed from main **`a4ce2b6`** on2026-10-14 with explicit approval. It includes oversized originals and the Moderate-review fixes, replacing the isolated channel-only build.
+- Production has migrations**0001–0011**, including separately approved0009 and0011. No migrations remained pending after application. Existing original captures, notice baselines and guild routing were preserved.
+- This was a scoped rollout, not blanket permission for subsequent migrations/deployments. Inspect every future pending migration and obtain approval; keep schema/code compatible.
 - Five manual channel cards containing25 already collected notices were confirmed by Discord API readback; this does not prove future scheduled end-to-end delivery or visual client rendering. Old combined channel is deleted and fallback is NULL.
-- No push, live collection, workflow dispatch, secret change or deployment is authorized by a cleanup request. See [verification history](docs/VERIFICATION.md) for exact rollout provenance and unresolved limits.
+- The2026-10-14 follow-up explicitly approved push, migration0009/0011, deployment and workflow verification: notices/backfill in normal mode with `start=false`, OCR with `ingest=false`. This does not authorize future executions or secret changes. A cleanup request alone never authorizes external mutations. See [verification history](docs/VERIFICATION.md) for exact rollout provenance and unresolved limits.

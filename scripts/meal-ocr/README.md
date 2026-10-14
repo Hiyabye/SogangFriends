@@ -63,7 +63,7 @@ Official weights may be cached under `~/.paddlex` / `~/.EasyOCR`; the venv, sour
 | `layout-941660.json`, `truth-2026-10-13.json`, `truth-2026-10-17.json` | Original week-specific reviewed geometry/transcriptions, not future-week templates |
 | [EVALUATION.md](EVALUATION.md) | Source hashes, measurements and comparison rationale |
 
-Activation and actual Linux/live-ingestion runs are recorded once in [VERIFICATION.md](../../docs/VERIFICATION.md). Retired inference trial details are historical evidence, not instructions to recreate those paths. The local meal display-hash migration0011 concerns report deduplication only; it has not been remotely applied and does not alter OCR ingestion.
+Activation and actual Linux/live-ingestion runs are recorded once in [VERIFICATION.md](../../docs/VERIFICATION.md). Retired inference trial details are historical evidence, not instructions to recreate those paths. Meal display-hash migration0011 was applied to production with explicit approval on2026-10-14. It concerns report deduplication only and does not alter OCR ingestion.
 
 ## Diagnostic CLI and shared helpers
 

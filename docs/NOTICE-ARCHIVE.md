@@ -6,7 +6,7 @@ The archive uses the **existing D1 database only**. Node/GitHub Actions fetch of
 
 `NOTICE_ARCHIVE_ENABLED=true` is checked into `wrangler.toml`; production archive activation and the initial six-source historical start were approved in 2026-10. This does **not** establish complete history or authorize starting missing historical cursors for the five later sources. See [VERIFICATION.md](VERIFICATION.md) for observed outcomes rather than inferring them from flags.
 
-**Production and main intentionally differ.** Worker `010e9653-ee6c-443c-ba2f-47ccac4c0cbb` came from isolated build `45de078`, excluding oversized-original change `9c90edd`. Migration `0010` is deployed, but `0009_notice_archive_chunks.sql` is not. The locally approved meal display-hash migration `0011` is also not deployed and does not change notice retention. Do not apply all pending migrations or deploy main without a separate rollout decision.
+**Production now includes the chunk implementation.** With explicit approval on2026-10-14, migrations0009 and0011 were applied and main `a4ce2b6` deployed as Worker `23c106c8-77c3-45de-b6a9-411c3070f54c`. All migrations0001–0011 are applied. Meal migration0011 changes report deduplication, not notice retention. This supersedes the earlier isolated channel-only build; future rollouts still need approval.
 
 ## Storage contract
 
@@ -17,14 +17,14 @@ The archive uses the **existing D1 database only**. Node/GitHub Actions fetch of
 
 ### Size limits
 
-| Boundary | Deployed code | Local main, requires 0009 and rollout |
-|---|---|---|
-| Original body, UTF-8 | 1 MiB | 8 MiB |
-| Detail-response transport | 2 MiB | 9 MiB |
-| Signed archive JSON request | 2 MiB | 16 MiB |
-| Attachment / image references | 100 / 100 | 100 / 100 |
+| Boundary | Deployed code |
+|---|---|
+| Original body, UTF-8 | 8 MiB |
+| Detail-response transport | 9 MiB |
+| Signed archive JSON request | 16 MiB |
+| Attachment / image references | 100 / 100 |
 
-In main, bodies up to 1 MiB stay inline. Larger bodies use ordered `notice_archive_raw_chunks` with metadata `body_storage='chunked'`, chunk count and byte count. Readers must concatenate by `ordinal`; original identity/hash remain unchanged. Metadata, chunks and index commit atomically. JSON escaping can exhaust the request limit before the body limit. Validated stored columns remain below **1,900,000 bytes per metadata row**, with bounded chunk rows below D1's **2,000,000-byte row ceiling**. Raw HTML is not copied into job payloads.
+Bodies up to 1 MiB stay inline. Larger bodies use ordered `notice_archive_raw_chunks` with metadata `body_storage='chunked'`, chunk count and byte count. Readers must concatenate by `ordinal`; original identity/hash remain unchanged. Metadata, chunks and index commit atomically. JSON escaping can exhaust the request limit before the body limit. Validated stored columns remain below **1,900,000 bytes per metadata row**, with bounded chunk rows below D1's **2,000,000-byte row ceiling**. Raw HTML is not copied into job payloads.
 
 D1 Free is limited to **500 MB per database**, shared with live bot data. New captures stop at a reported size of **400 MB**, or when size metadata is missing. Existing captures remain replayable. This guard is not a reservation: concurrent writes or the final capture may cross the threshold slightly. Full-history capacity and live Worker CPU/memory feasibility for oversized captures are unproven. Do not delete retained originals or independently delete indexes/progress to make space.
 
