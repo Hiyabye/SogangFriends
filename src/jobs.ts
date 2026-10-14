@@ -147,11 +147,12 @@ export async function executeJob(env:Env,job:Job) {
   if(!allowedGuild(g.id,env))continue;
   const prefix=`${job.id}:${g.id}:`;
   // A committed plan freezes destinations, including uncertain/legacy sends, across setup changes.
-  const existing=await env.DB.prepare('SELECT COUNT(*) AS count FROM deliveries WHERE guild_id=? AND substr(id,1,?)=?').bind(g.id,prefix.length,prefix).first<{count:number}>();
+  const existing=await env.DB.prepare("SELECT COUNT(*) AS count,MAX(COALESCE(json_extract(j.payload,'$.noticePlanVersion'),0)) AS plan_version FROM deliveries d LEFT JOIN jobs j ON j.id='send:'||d.id WHERE d.guild_id=? AND substr(d.id,1,?)=?").bind(g.id,prefix.length,prefix).first<{count:number;plan_version:number|null}>();
   if(existing?.count){
-   // Older versions committed chunks separately. Never silently complete a partial legacy plan,
+   // New send payloads carry a marker committed with the entire guild plan, even when groups
+   // were intentionally skipped. Older versions committed chunks separately. Never complete a partial legacy plan,
    // or guess new destinations for its missing chunks after an operator changes setup.
-   if(existing.count<batchNoticeCards(payload.notices as Notice[]).length)await env.DB.prepare("UPDATE jobs SET state='needs_review',lease_until=NULL,error='Incomplete existing notice delivery plan; operator review required' WHERE id=? AND state='running'").bind(job.id).run();
+   if(existing.plan_version!==1&&existing.count<batchNoticeCards(payload.notices as Notice[]).length)await env.DB.prepare("UPDATE jobs SET state='needs_review',lease_until=NULL,error='Incomplete existing notice delivery plan; operator review required' WHERE id=? AND state='running'").bind(job.id).run();
    continue;
   }
   const destinations=new Map<string,Notice[]>();
@@ -162,7 +163,7 @@ export async function executeJob(env:Env,job:Job) {
   }
   const statements: D1PreparedStatement[]=[];let index=0;
   for(const [channel,notices] of destinations)for(const chunk of batchNoticeCards(notices)){
-   statements.push(...deliveryIntentStatements(env,`${prefix}${index++}`,g.id,channel,chunk.content,new Date(Date.parse(job.created_at)+86400_000).toISOString(),undefined,undefined,chunk.noticeCard));
+   statements.push(...deliveryIntentStatements(env,`${prefix}${index++}`,g.id,channel,chunk.content,new Date(Date.parse(job.created_at)+86400_000).toISOString(),undefined,undefined,chunk.noticeCard,1));
   }
   // All destinations commit together; a partial failure must not leave a half-frozen plan.
   if(statements.length)await env.DB.batch(statements);
@@ -245,7 +246,13 @@ export async function executeJob(env:Env,job:Job) {
  if(!row) break;
  if(!allowedGuild(row.guild_id,env)){await env.DB.prepare("UPDATE deliveries SET state='failed',error='guild disabled' WHERE id=?").bind(payload.deliveryId).run();break;}
  // Keep file bytes transient; the durable intent carries only the meal date/slot.
- const content=payload.mealDate&&payload.mealSlot?await mealReportResponse(env,payload.mealDate,payload.mealSlot):payload.mealDate?await mealCommandResponse(env,payload.mealDate):payload.noticeCard?noticeCardMessage(payload.noticeCard):row.content;
+ let content:DiscordMessageInput;
+ try{content=payload.mealDate&&payload.mealSlot?await mealReportResponse(env,payload.mealDate,payload.mealSlot):payload.mealDate?await mealCommandResponse(env,payload.mealDate):payload.noticeCard?noticeCardMessage(payload.noticeCard):row.content;}
+ catch(error){
+  // No Discord POST has started: release only this definite pre-send failure for safe retry.
+  await env.DB.prepare("UPDATE deliveries SET state='retry',error='Delivery preparation failed',updated_at=? WHERE id=? AND state='sending'").bind(nowIso(),payload.deliveryId).run();
+  throw error;
+ }
  if(row.expires_at<=nowIso()||(payload.mealDate&&payload.mealDate!==todayKst())){
  await env.DB.prepare("UPDATE deliveries SET state='expired',updated_at=? WHERE id=? AND state='sending'").bind(nowIso(),payload.deliveryId).run();break;
  }

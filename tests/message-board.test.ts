@@ -4,7 +4,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {readFileSync} from 'node:fs';
 import {executeJob,planCron,updateMealBoard} from '../src/jobs';
 import {updateScheduleSummary} from '../src/schedule-summary';
-import {BoardRetry} from '../src/message-board';
+import {BoardRetry,updateBoard} from '../src/message-board';
 import {fetchImage} from '../src/sources';
 import {addDays} from '../src/time';
 import type {Job,Schedule} from '../src/types';
@@ -52,10 +52,12 @@ describe('change-driven persistent boards',()=>{
   expect(network.mock.calls.map(call=>call[1]!.method)).toEqual(['POST','POST','DELETE','POST','DELETE']);expect(db.sqlite.prepare('SELECT COUNT(*) n FROM deliveries').get()!.n).toBe(0);
  });
  it('removes image attachments once OCR text becomes usable',async()=>{
-  const week=seed('2026-10-12','941660',false);const network=vi.spyOn(globalThis,'fetch').mockResolvedValue(sent());await run(true);
+  const week=seed('2026-10-12','941660',false);const network=successfulNetwork();await run(true);
   expect(payload(network.mock.calls[0]).attachments).toHaveLength(1);expect(payload(network.mock.calls[0]).components[0].components[1].items[0].media.url).toMatch(/^attachment:/);
   week.days[1].breakfastKorean=available('아침');week.days[1].dinner=available('저녁');db.sqlite.prepare('UPDATE meals SET data=?').run(JSON.stringify(week));await run();
   expect(payload(network.mock.calls[1]).attachments).toEqual([]);expect(JSON.stringify(payload(network.mock.calls[1]).components)).not.toContain('attachment://');
+  expect(state().message_id).toBe('445');expect(network.mock.calls.map(call=>call[1]!.method)).toEqual(['POST','POST','DELETE']);expect(network.mock.calls[2][0]).toContain('/messages/444');
+  expect(db.sqlite.prepare("SELECT state FROM jobs WHERE kind='meal-cleanup'").get()!.state).toBe('done');
  });
  it('sends full two-week attachments on safely rejected Sunday POST retries',async()=>{
   seed('2026-10-12','941660',false);seed('2026-10-19','941999',false);
@@ -73,10 +75,10 @@ describe('change-driven persistent boards',()=>{
   vi.setSystemTime(new Date('2026-10-13T22:00:00Z'));await expect(run()).rejects.toMatchObject({retryAfter:37800});expect(network).toHaveBeenCalledTimes(2);
  });
  it('freezes an uncertain replacement even with an old ID and reverted data',async()=>{
-  const week=seed();const original=week.days[1].dinner;const network=vi.spyOn(globalThis,'fetch').mockResolvedValueOnce(sent()).mockRejectedValueOnce(new Error('unknown POST'));await run(true);
+  const week=seed();const original=week.days[1].dinner;const network=vi.spyOn(globalThis,'fetch').mockResolvedValueOnce(sent()).mockRejectedValueOnce(new Error('unknown POST'));await run(true);const displayedHash=state().display_hash;
   week.days[1].dinner=available('B');db.sqlite.prepare('UPDATE meals SET data=?').run(JSON.stringify(week));await run();
   week.days[1].dinner=original;db.sqlite.prepare('UPDATE meals SET data=?').run(JSON.stringify(week));await run(true);
-  expect(network).toHaveBeenCalledTimes(2);expect(state().state).toBe('uncertain');expect(state().message_id).toBe('444');
+  expect(network).toHaveBeenCalledTimes(2);expect(state().state).toBe('uncertain');expect(state().message_id).toBe('444');expect(state().display_hash).toBe(displayedHash);
  });
  it('freezes an interrupted replacement with the previous message still tracked',async()=>{
   seed();const network=successfulNetwork();await run(true);
@@ -92,6 +94,36 @@ describe('change-driven persistent boards',()=>{
   const network=successfulNetwork();await run(true);expect(payload(network.mock.calls[0]).attachments).toEqual([]);await expect(run()).rejects.toMatchObject({retryAfter:900});
   vi.setSystemTime(new Date('2026-10-13T00:15:00Z'));await run();expect(network).toHaveBeenCalledTimes(3);expect(payload(network.mock.calls[1]).attachments).toHaveLength(1);expect(network.mock.calls[1][1]!.method).toBe('POST');expect(state().state).toBe('ready');
  });
+ it('silently retries repeated image failures and replaces only when the image recovers',async()=>{
+  seed('2026-10-12','941660',false);vi.mocked(fetchImage).mockRejectedValueOnce(new Error('temporary')).mockRejectedValueOnce(new Error('still unavailable'));
+  const network=successfulNetwork();await run(true);
+  const initial=state();expect(initial.state).toBe('retry');expect(initial.content_hash).toBeTypeOf('string');expect(initial.display_hash).toBeTypeOf('string');
+  vi.setSystemTime(new Date('2026-10-13T00:15:00Z'));await run();
+  expect(network).toHaveBeenCalledTimes(1);expect(fetchImage).toHaveBeenCalledTimes(2);
+  expect(state()).toMatchObject({state:'retry',message_id:'444',content_hash:initial.content_hash,display_hash:initial.display_hash,retry_at:'2026-10-13T00:30:00.000Z'});
+  expect(db.sqlite.prepare("SELECT COUNT(*) n FROM jobs WHERE kind='meal-cleanup'").get()!.n).toBe(0);
+  await expect(run()).rejects.toMatchObject({retryAfter:900});expect(fetchImage).toHaveBeenCalledTimes(2);
+  vi.setSystemTime(new Date('2026-10-13T00:30:00Z'));await run();
+  expect(network.mock.calls.map(call=>call[1]!.method)).toEqual(['POST','POST','DELETE']);expect(network.mock.calls[2][0]).toContain('/messages/444');
+  expect(state()).toMatchObject({state:'ready',message_id:'445',retry_at:null,content_hash:initial.content_hash});expect(state().display_hash).not.toBe(initial.display_hash);
+  expect(payload(network.mock.calls[1]).attachments).toHaveLength(1);await run();expect(network).toHaveBeenCalledTimes(3);expect(fetchImage).toHaveBeenCalledTimes(3);
+ });
+ it('does not repost an identical incomplete replacement after its initial successful change',async()=>{
+  const week=seed();const network=successfulNetwork();await run(true);const originalHash=state().display_hash;
+  week.days[1].breakfastKorean=unknown();week.days[1].dinner=unknown();db.sqlite.prepare('UPDATE meals SET data=?').run(JSON.stringify(week));vi.mocked(fetchImage).mockRejectedValue(new Error('unavailable'));
+  await run();const fallbackHash=state().display_hash;expect(fallbackHash).not.toBe(originalHash);
+  expect(network.mock.calls.map(call=>call[1]!.method)).toEqual(['POST','POST','DELETE']);expect(state()).toMatchObject({state:'retry',message_id:'445'});
+  vi.setSystemTime(new Date('2026-10-13T00:15:00Z'));await run();
+  expect(state()).toMatchObject({state:'retry',message_id:'445',display_hash:fallbackHash});expect(network).toHaveBeenCalledTimes(3);
+ });
+ it('includes attachment bytes in the confirmed displayed hash',async()=>{
+  const network=successfulNetwork();
+  const render=(byte:number)=>async()=>({content:'same visible text',file:{filename:'menu.png',mime:'image/png',bytes:new Uint8Array([byte])}});
+  const options={table:'meal_messages' as const,field:'meals_channel' as const,date:'2026-10-13',key:'2026-10-13:0',allowCreate:true,replace:true,valid:()=>true};
+  await updateBoard(db.env,'111','333',{...options,hash:'first-projection',render:render(1)});const firstHash=state().display_hash;
+  await updateBoard(db.env,'111','333',{...options,hash:'second-projection',render:render(2)});
+  expect(state().display_hash).not.toBe(firstHash);expect(network.mock.calls.map(call=>call[1]!.method)).toEqual(['POST','POST','DELETE']);
+ });
  it('retains the old message after confirmed replacement rejection and retries current content',async()=>{
   const week=seed();const network=vi.spyOn(globalThis,'fetch').mockResolvedValueOnce(sent()).mockResolvedValueOnce(Response.json({message:'denied'},{status:403})).mockResolvedValueOnce(sent()).mockResolvedValueOnce(new Response(null,{status:204}));await run(true);
   week.days[1].dinner=available('수정');db.sqlite.prepare('UPDATE meals SET data=?').run(JSON.stringify(week));await run();
@@ -106,11 +138,12 @@ describe('change-driven persistent boards',()=>{
   expect(cleanup.state).toBe('pending');expect(cleanup.available_at).toBe('2026-10-13T00:02:00.000Z');
   await executeJob(db.env,cleanup);expect(network.mock.calls[3][1]!.method).toBe('DELETE');expect(network.mock.calls[3][0]).toContain('/messages/444');
  });
- it('does not delete or replay a confirmed POST if persisting replacement proof fails',async()=>{
-  const week=seed();const network=successfulNetwork();await run(true);
+ it('atomically rolls back replacement proof and never replays its confirmed POST after a tracking failure',async()=>{
+  const week=seed();const network=successfulNetwork();await run(true);const displayedHash=state().display_hash;
   week.days[1].dinner=available('수정');db.sqlite.prepare('UPDATE meals SET data=?').run(JSON.stringify(week));
-  vi.spyOn(db.env.DB,'batch').mockRejectedValueOnce(new Error('D1 unavailable'));
-  await expect(run()).rejects.toThrow('D1 unavailable');expect(state().message_id).toBe('444');expect(state().state).toBe('creating');
+  db.sqlite.exec("CREATE TRIGGER reject_replacement_tracking BEFORE UPDATE OF display_hash ON meal_messages WHEN NEW.display_hash IS NOT OLD.display_hash BEGIN SELECT RAISE(ABORT,'D1 unavailable'); END;");
+  await expect(run()).rejects.toThrow('D1 unavailable');expect(state().message_id).toBe('444');expect(state().state).toBe('creating');expect(state().display_hash).toBe(displayedHash);
+  expect(db.sqlite.prepare("SELECT COUNT(*) n FROM jobs WHERE kind='meal-cleanup'").get()!.n).toBe(0);
   expect(network.mock.calls.map(call=>call[1]!.method)).toEqual(['POST','POST']);
   vi.setSystemTime(new Date('2026-10-13T00:21:00Z'));await run();expect(state().state).toBe('uncertain');expect(network).toHaveBeenCalledTimes(2);
  });
@@ -140,6 +173,23 @@ describe('change-driven persistent boards',()=>{
    const before=legacy.prepare('SELECT * FROM schedule_messages ORDER BY guild_id').all();legacy.exec(readFileSync('migrations/0008_message_boards.sql','utf8'));
    const after=legacy.prepare('SELECT * FROM schedule_messages ORDER BY guild_id').all();for(const [i,row] of after.entries()){expect(row.content_hash).toBeNull();expect(row.projection_key).toBeNull();delete row.content_hash;delete row.projection_key;expect(row).toEqual(before[i]);}
   }finally{legacy.close();}
+ });
+ it('adds a nullable meal-only displayed hash without changing existing tracking',()=>{
+  const legacy=new DatabaseSync(':memory:');try{
+   legacy.exec(readFileSync('migrations/0006_schedule_messages.sql','utf8'));legacy.exec(readFileSync('migrations/0008_message_boards.sql','utf8'));
+   legacy.exec("INSERT INTO meal_messages(guild_id,channel_id,message_id,state,content_hash,projection_key,updated_at,error) VALUES('111','333','444','ready','intended','2026-10-13:0','old',NULL),('222','333','555','uncertain','prior','2026-10-13:0','old','unknown POST')");
+   const before=legacy.prepare('SELECT * FROM meal_messages ORDER BY guild_id').all();legacy.exec(readFileSync('migrations/0011_meal_display_hash.sql','utf8'));
+   const after=legacy.prepare('SELECT * FROM meal_messages ORDER BY guild_id').all();for(const [i,row] of after.entries()){expect(row.display_hash).toBeNull();delete row.display_hash;expect(row).toEqual(before[i]);}
+   expect(legacy.prepare('PRAGMA table_info(schedule_messages)').all().some(column=>column.name==='display_hash')).toBe(false);
+  }finally{legacy.close();}
+ });
+ it('does not repost unchanged ready legacy rows merely to populate the displayed hash',async()=>{
+  seed();const network=successfulNetwork();await run(true);db.sqlite.exec('UPDATE meal_messages SET display_hash=NULL');
+  await run();expect(network).toHaveBeenCalledTimes(1);expect(state()).toMatchObject({state:'ready',message_id:'444',display_hash:null});
+ });
+ it('keeps uncertain legacy rows frozen even without a displayed hash',async()=>{
+  seed();db.sqlite.exec("INSERT INTO meal_messages(guild_id,channel_id,message_id,state,updated_at,error) VALUES('111','333','444','uncertain','old','unknown POST')");
+  const network=successfulNetwork();await run(true);expect(network).not.toHaveBeenCalled();expect(state()).toMatchObject({state:'uncertain',message_id:'444',display_hash:null});
  });
  it('blocks concurrent creation',async()=>{
   seed();let finish!:(response:Response)=>void;const network=vi.spyOn(globalThis,'fetch').mockImplementation(()=>new Promise(resolve=>{finish=resolve;}));const first=run(true);
@@ -172,7 +222,11 @@ describe('change-driven persistent boards',()=>{
  it('polls every 15 minutes but does not bootstrap new boards outside their approved windows',async()=>{
   vi.setSystemTime(new Date('2026-10-13T02:00:00Z'));seed();const network=vi.spyOn(globalThis,'fetch').mockResolvedValue(sent());await planCron(db.env,Date.now());
   expect(db.sqlite.prepare("SELECT kind FROM jobs WHERE kind IN ('meal-refresh','schedule-refresh') ORDER BY kind").all()).toEqual([{kind:'meal-refresh'},{kind:'schedule-refresh'}]);
-  await executeJob(db.env,{id:'poll',kind:'meal-refresh',payload:JSON.stringify({date:'2026-10-13'})} as Job);expect(network).not.toHaveBeenCalled();
-  await executeJob(db.env,{id:'stale-slot',kind:'meal-report',payload:JSON.stringify({date:'2026-10-13',mealSlot:'morning'})} as Job);expect(network).not.toHaveBeenCalled();
+  const refreshes=db.sqlite.prepare("SELECT * FROM jobs WHERE kind IN ('meal-refresh','schedule-refresh')").all() as unknown as Job[];
+  for(const refresh of refreshes)await executeJob(db.env,refresh);
+  await executeJob(db.env,{id:'stale-slot',kind:'meal-report',payload:JSON.stringify({date:'2026-10-13',mealSlot:'morning'})} as Job);
+  const children=db.sqlite.prepare("SELECT * FROM jobs WHERE kind IN ('meal-board','schedule-summary')").all() as unknown as Job[];expect(children).toHaveLength(3);
+  for(const child of children)await executeJob(db.env,child);
+  expect(network).not.toHaveBeenCalled();expect(db.sqlite.prepare('SELECT COUNT(*) n FROM meal_messages').get()!.n).toBe(0);expect(db.sqlite.prepare('SELECT COUNT(*) n FROM schedule_messages').get()!.n).toBe(0);
  });
 });

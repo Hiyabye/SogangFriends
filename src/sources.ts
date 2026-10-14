@@ -44,6 +44,7 @@ export async function sourceBytes(url: string, limit=2*1024*1024): Promise<{byte
   if (!response.ok || !response.body) {
    const error=new SourceHttpError(response.status);
    if(response.status===429){const seconds=Number(response.headers.get('retry-after'));error.retryAfter=Number.isFinite(seconds)&&seconds>0?Math.min(86400,seconds):60;}
+   await response.body?.cancel().catch(()=>{});
    throw error;
   }
   if (Number(response.headers.get('content-length'))>limit) { await response.body.cancel(); throw new Error('Source too large'); }
@@ -57,7 +58,7 @@ async function html(url:string):Promise<string> { const r=await sourceBytes(url)
 export function parseUniversity(value: unknown, source: Source=SOURCES[0], expectedPage=1): Notice[] {
  if(!Number.isSafeInteger(expectedPage)||expectedPage<1)throw new Error('Invalid university page');
  const v=value as {statusCode?:unknown;data?:{list?:unknown;total?:unknown;pageNum?:unknown}};
- if(v?.statusCode!==200 || !v.data || !Array.isArray(v.data.list) || v.data.pageNum!==expectedPage || typeof v.data.total!=='number' || v.data.total<0 || v.data.list.length>50 || (!v.data.list.length && v.data.total!==0)) throw new Error('Unexpected university response');
+ if(v?.statusCode!==200 || !v.data || !Array.isArray(v.data.list) || v.data.pageNum!==expectedPage || typeof v.data.total!=='number' || !Number.isSafeInteger(v.data.total) || v.data.total<0 || v.data.list.length>50 || (!v.data.list.length && v.data.total!==0)) throw new Error('Unexpected university response');
  const ids=new Set<string>(); const notices:Notice[]=[]; let regular=0;
  for(const raw of v.data.list){const r=raw as Record<string,unknown>; if(!positive(r.pkId)||r.configId!==2||typeof r.regDate!=='string'||!/^\d{14}$/.test(r.regDate)||!['Y','N'].includes(String(r.isTop)))throw new Error('Invalid university row');
   const id=String(r.pkId);if(ids.has(id))throw new Error('Duplicate university identity');ids.add(id);if(r.isTop==='N')regular++;
@@ -73,7 +74,7 @@ export function parseComputing(input:string,source:Source): {notices:Notice[];re
  if(heading!==expected[source.id])throw new Error('Wrong computing board');
  const active=one(one(doc,n=>cls(n,'board-lnb')),n=>tag(n,'a')&&attr(n,'aria-current')==='page');
  if(new URL(attr(active,'href'),source.url).pathname!==new URL(source.url).pathname)throw new Error('Wrong active board');
- const categories=all(header,n=>tag(n,'button')&&attr(n,'aria-pressed')==='true'); if(categories.length&&text(categories[0])!=='전체')throw new Error('Filtered board');
+ const categories=all(header,n=>tag(n,'button')&&attr(n,'aria-pressed')==='true'); if(categories.some(category=>text(category)!=='전체'))throw new Error('Filtered board');
  const searches=all(content,n=>tag(n,'input')&&attr(n,'type')==='search'); if(searches.some(n=>attr(n,'value').trim()))throw new Error('Filtered search');
  const table=one(one(content,n=>cls(n,'board-list')),n=>tag(n,'table')); const tbody=one(table,n=>tag(n,'tbody')); const rows=all(tbody,n=>tag(n,'tr'));
  if(!rows.length)throw new Error('Empty board needs explicit validation');

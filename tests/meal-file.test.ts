@@ -26,7 +26,7 @@ describe('official meal file replies',()=>{
   const send=vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response('{}'));await command();await run();
   const body=JSON.parse(send.mock.calls[0][1]!.body as string);
   expect(body.content).toContain('이미지 파일을 불러오지 못했습니다');expect(body.content).toContain(source);expect(body.content).not.toContain('private upstream detail');
-  expect(body).not.toHaveProperty('attachments');expect(body).not.toHaveProperty('embeds');expect(job().state).toBe('done');
+  expect(body.attachments).toEqual([]);expect(body).not.toHaveProperty('embeds');expect(job().state).toBe('done');
  });
  it('replaces the attachment set on a retried original-message PATCH',async()=>{
   const send=vi.spyOn(globalThis,'fetch').mockResolvedValueOnce(new Response('{}',{status:503})).mockResolvedValueOnce(new Response('{}'));
@@ -39,11 +39,25 @@ describe('official meal file replies',()=>{
    expect(await (form.get('files[0]') as File).arrayBuffer()).toEqual(picture.bytes.buffer);
   }
  });
+ it('clears previous files when a lost-response image PATCH is retried with usable text',async()=>{
+  const send=vi.spyOn(globalThis,'fetch').mockRejectedValueOnce(new Error('lost webhook response')).mockResolvedValueOnce(new Response('{}'));
+  await command();await run();expect(job().state).toBe('retry');
+  const first=send.mock.calls[0][1]!,form=first.body as FormData;
+  expect(first.method).toBe('PATCH');expect(form).toBeInstanceOf(FormData);
+  expect(JSON.parse(String(form.get('payload_json'))).attachments).toEqual([{id:0,filename:'bellarmino-2026-10-12-2026-10-18.png'}]);
+  expect(form.get('files[0]')).toBeInstanceOf(File);
+  cacheWeek(true);vi.advanceTimersByTime(30000);await run();
+  expect(send).toHaveBeenCalledTimes(2);expect(job().state).toBe('done');expect(job().payload).toBe('{}');
+  const second=send.mock.calls[1][1]!,body=JSON.parse(second.body as string);
+  expect(second.method).toBe('PATCH');expect(new Headers(second.headers).get('content-type')).toBe('application/json');
+  expect(typeof second.body).toBe('string');expect(body.content).toContain('fixture menu');expect(body.attachments).toEqual([]);expect(body.allowed_mentions.parse).toEqual([]);
+  expect(fetchImage).toHaveBeenCalledTimes(1);
+ });
  it('does not upload an image whose week expires during download',async()=>{
   vi.setSystemTime(new Date('2026-10-18T14:59:30Z'));
   vi.mocked(fetchImage).mockImplementationOnce(async()=>{vi.advanceTimersByTime(120000);return picture;});
   const send=vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response('{}'));await command('2026-10-18');await run();
-  const body=JSON.parse(send.mock.calls[0][1]!.body as string);expect(body.content).toContain('식단 확인 불가 (2026-10-18)');expect(body).not.toHaveProperty('attachments');
+  const body=JSON.parse(send.mock.calls[0][1]!.body as string);expect(body.content).toContain('식단 확인 불가 (2026-10-18)');expect(body.attachments).toEqual([]);
  });
  it('does not send to an interaction which expires during download',async()=>{
   vi.mocked(fetchImage).mockImplementationOnce(async()=>{vi.advanceTimersByTime(20000);return picture;});

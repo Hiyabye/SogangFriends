@@ -86,7 +86,7 @@ export async function completeInteraction(env:Env,job:Job) {
  if(Date.now()>expires){
  await env.DB.prepare("UPDATE jobs SET state='needs_review',lease_until=NULL,error='interaction expired before reply' WHERE id=?").bind(job.id).run();return;
  }
- let body:BodyInit=JSON.stringify(message(content)),headers:HeadersInit|undefined={'Content-Type':'application/json'};
+ let body:BodyInit=JSON.stringify({attachments:[],...message(content)}),headers:HeadersInit|undefined={'Content-Type':'application/json'};
  if(typeof content!=='string'&&(content.file||content.files?.length)){
  const form=new FormData();form.append('payload_json',body);
  for(const [id,file] of (content.files??[content.file!]).entries())form.append(`files[${id}]`,new Blob([Uint8Array.from(file.bytes).buffer],{type:file.mime}),file.filename);

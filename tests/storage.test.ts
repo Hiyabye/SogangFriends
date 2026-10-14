@@ -168,9 +168,24 @@ describe('delivery consumer integration',()=>{
   expect(Date.parse(String(row('jobs','send:limited')!.available_at))-Date.now()).toBe(10000);
   expect(await claim(db.env,'send:limited')).toBeNull();expect(fetch).toHaveBeenCalledTimes(1);
  });
- it('expires stale delivery intent before POST when the migration supports expiry',async(context)=>{
-  const columns=db.sqlite.prepare('PRAGMA table_info(deliveries)').all();
-  if(!columns.some(c=>c.name==='expires_at')) {context.skip('expires_at migration not yet implemented');return;}
+ it('retries definite pre-send preparation failures without stranding a sending delivery',async()=>{
+  vi.useFakeTimers();vi.setSystemTime(new Date('2026-10-13T00:00:00Z'));
+  db.env.DISCORD_TOKEN='fixture-only';await deliveryIntent(db.env,'preparation','111','1001','fallback',undefined,'2026-10-13');
+  const prepare=db.env.DB.prepare.bind(db.env.DB);let failed=false;
+  vi.spyOn(db.env.DB,'prepare').mockImplementation((sql:string)=>{
+   if(!failed&&sql.startsWith('SELECT data,source_url FROM meals')){failed=true;throw new Error('temporary D1 read failure');}
+   return prepare(sql);
+  });
+  const fetch=vi.fn().mockResolvedValue(Response.json({id:'9001',channel_id:'1001'}));vi.stubGlobal('fetch',fetch);
+  const batch=()=>({messages:[{body:{id:'send:preparation'},ack:vi.fn()}],queue:'fixture'} as never);
+  await consume(db.env,batch());
+  expect(fetch).not.toHaveBeenCalled();expect(row('deliveries','preparation')).toMatchObject({state:'retry',error:'Delivery preparation failed'});
+  expect(row('jobs','send:preparation')).toMatchObject({state:'retry',attempts:1});
+  vi.advanceTimersByTime(120000);await consume(db.env,batch());await consume(db.env,batch());
+  expect(fetch).toHaveBeenCalledTimes(1);expect(row('deliveries','preparation')).toMatchObject({state:'sent',message_id:'9001'});
+  expect(row('jobs','send:preparation')).toMatchObject({state:'done',attempts:2});
+ });
+ it('expires stale delivery intent before POST',async()=>{
   db.env.DISCORD_TOKEN='fixture-only';await deliveryIntent(db.env,'stale','111','1001','old meal');
   db.sqlite.prepare("UPDATE deliveries SET expires_at='2026-01-01T00:00:00Z' WHERE id=?").run('stale');
   const fetch=vi.fn();vi.stubGlobal('fetch',fetch);await executeJob(db.env,jobFor('stale'));

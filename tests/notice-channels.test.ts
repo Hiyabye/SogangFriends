@@ -65,6 +65,24 @@ describe('institution notice routing',()=>{
    expect(db.sqlite.prepare('SELECT * FROM deliveries').all()).toEqual(before);
   }finally{db.close();}
  });
+ it('recognizes an atomic group-only plan when unconfigured notices span more chunks',async()=>{
+  vi.useFakeTimers();vi.setSystemTime(new Date('2026-10-13T01:00:00Z'));const db=testDatabase();try{
+   const computing=notices.find(notice=>notice.source==='academicNotice')!;
+   const many=[notices[0],...Array.from({length:20},(_,index)=>({...computing,id:String(index+100),title:'공지'.repeat(100),url:noticeDetailUrl(SOURCES.find(source=>source.id==='academicNotice')!,String(index+100))}))];
+   expect(batchNoticeCards(many).length).toBeGreaterThan(1);
+   const mixed={...job,payload:JSON.stringify({notices:many})};
+   db.sqlite.prepare("INSERT INTO guilds(id,university_channel,updated_at) VALUES('111','101','fixture')").run();
+   db.sqlite.prepare("INSERT INTO jobs(id,kind,payload,created_at,available_at,state) VALUES(?,'notice-alert',?,?,?,'running')").run(job.id,mixed.payload,job.created_at,job.available_at);
+   await executeJob(db.env,mixed);
+   const before=db.sqlite.prepare('SELECT * FROM deliveries').all();expect(before).toHaveLength(1);
+   const payload=db.sqlite.prepare("SELECT payload FROM jobs WHERE kind='deliver'").get()!.payload as string;expect(JSON.parse(payload).noticePlanVersion).toBe(1);
+   // Neither unconfigured groups nor a later setup change may reinterpret the committed plan.
+   db.sqlite.prepare("UPDATE guilds SET computing_channel='102'").run();
+   await executeJob(db.env,mixed);
+   expect(db.sqlite.prepare('SELECT * FROM deliveries').all()).toEqual(before);
+   expect(db.sqlite.prepare('SELECT state,error FROM jobs WHERE id=?').get(job.id)).toMatchObject({state:'running',error:null});
+  }finally{db.close();}
+ });
  it('rolls back all destinations on failure and can safely retry the uncommitted plan',async()=>{
   vi.useFakeTimers();vi.setSystemTime(new Date('2026-10-13T01:00:00Z'));const db=testDatabase();try{
    db.sqlite.prepare("INSERT INTO guilds(id,notices_channel,computing_channel,updated_at) VALUES('111','999','102','fixture')").run();

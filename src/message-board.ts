@@ -10,6 +10,14 @@ export async function boardHash(value:unknown):Promise<string>{
  const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(value)));
  return Array.from(new Uint8Array(bytes),byte=>byte.toString(16).padStart(2,'0')).join('');
 }
+async function mealDisplayHash(input:DiscordMessageInput):Promise<string>{
+ const files=typeof input==='string'?[]:input.files??(input.file?[input.file]:[]);
+ const images=await Promise.all(files.map(async file=>({
+  mime:file.mime,
+  hash:Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',Uint8Array.from(file.bytes).buffer)),byte=>byte.toString(16).padStart(2,'0')).join(''),
+ })));
+ return boardHash({message:message(input),images});
+}
 type Outcome={state:'sent';messageId:string}|{state:'retry';seconds:number}|{state:'missing'|'failed'|'uncertain'};
 async function send(env:Env,channel:string,input:DiscordMessageInput,id:string|null):Promise<Outcome>{
  if(!env.DISCORD_TOKEN)return {state:'failed'};
@@ -60,22 +68,29 @@ export async function updateBoard(env:Env,guild:string,channel:string,options:Bo
  if(allowCreate)await env.DB.prepare(`INSERT OR IGNORE INTO ${table}(guild_id,channel_id,updated_at) VALUES(?,?,?)`).bind(guild,channel,now).run();
  await env.DB.prepare(`UPDATE ${table} SET state='uncertain',lease_owner=NULL,lease_until=NULL,error='Board creation interrupted; manual reconciliation required',updated_at=? WHERE guild_id=? AND channel_id=? AND state='creating' AND lease_until<?`).bind(now,guild,channel,now).run();
  const owner=crypto.randomUUID();
- const row=await env.DB.prepare(`UPDATE ${table} SET state=CASE WHEN message_id IS NULL OR ?=1 THEN 'creating' ELSE 'editing' END,lease_owner=?,lease_until=?,updated_at=?,error=NULL WHERE guild_id=? AND channel_id=? AND state!='uncertain' AND (message_id IS NOT NULL OR ?=1 OR state='retry') AND (lease_owner IS NULL OR (state='editing' AND lease_until<?)) AND (state IN ('retry','editing') OR content_hash IS NULL OR content_hash!=?) AND (projection_key IS NULL OR projection_key<=?) AND (retry_at IS NULL OR retry_at<=?) RETURNING message_id`)
- .bind(replace?1:0,owner,new Date(Date.now()+LEASE_MS).toISOString(),now,guild,channel,allowCreate?1:0,now,hash,key,now).first<{message_id:string|null}>();
+ const row=await env.DB.prepare(`UPDATE ${table} SET state=CASE WHEN message_id IS NULL OR ?=1 THEN 'creating' ELSE 'editing' END,lease_owner=?,lease_until=?,updated_at=?,error=NULL WHERE guild_id=? AND channel_id=? AND state!='uncertain' AND (message_id IS NOT NULL OR ?=1 OR state='retry') AND (lease_owner IS NULL OR (state='editing' AND lease_until<?)) AND (state IN ('retry','editing') OR content_hash IS NULL OR content_hash!=?) AND (projection_key IS NULL OR projection_key<=?) AND (retry_at IS NULL OR retry_at<=?) RETURNING message_id${replace?',display_hash':''}`)
+ .bind(replace?1:0,owner,new Date(Date.now()+LEASE_MS).toISOString(),now,guild,channel,allowCreate?1:0,now,hash,key,now).first<{message_id:string|null;display_hash?:string|null}>();
  if(!row){
   const current=await env.DB.prepare(`SELECT state,retry_at,content_hash FROM ${table} WHERE guild_id=? AND channel_id=?`).bind(guild,channel).first<{state:string;retry_at:string|null;content_hash:string|null}>();
   if(current?.state!=='uncertain'&&(current?.state==='retry'||current?.content_hash!==hash)&&current?.retry_at&&current.retry_at>now)throw new BoardRetry(Math.max(1,Math.ceil((Date.parse(current.retry_at)-Date.now())/1000)));
   if(current?.state==='creating'||current?.state==='editing')throw new BoardRetry();
   return;
  }
+ let displayHash:string|null=null;
  const release=async(state:string,error:string|null,id:string|null,success=false,retryAt:string|null=null)=>{
-  await env.DB.prepare(`UPDATE ${table} SET state=?,error=?,message_id=?,updated_date=CASE WHEN ?=1 THEN ? ELSE updated_date END,content_hash=CASE WHEN ?=1 THEN ? ELSE content_hash END,projection_key=CASE WHEN ?=1 THEN ? ELSE projection_key END,retry_at=?,lease_owner=NULL,lease_until=NULL,updated_at=? WHERE guild_id=? AND channel_id=? AND lease_owner=?`)
-   .bind(state,error,id,success?1:0,date,success?1:0,hash,success?1:0,key,retryAt,new Date().toISOString(),guild,channel,owner).run();
+  await env.DB.prepare(`UPDATE ${table} SET state=?,error=?,message_id=?,updated_date=CASE WHEN ?=1 THEN ? ELSE updated_date END,content_hash=CASE WHEN ?=1 THEN ? ELSE content_hash END,projection_key=CASE WHEN ?=1 THEN ? ELSE projection_key END${replace?',display_hash=CASE WHEN ?=1 THEN ? ELSE display_hash END':''},retry_at=?,lease_owner=NULL,lease_until=NULL,updated_at=? WHERE guild_id=? AND channel_id=? AND lease_owner=?`)
+   .bind(state,error,id,success?1:0,date,success?1:0,hash,success?1:0,key,...(replace?[success?1:0,displayHash]:[]),retryAt,new Date().toISOString(),guild,channel,owner).run();
  };
  let input:DiscordMessageInput;
- try{input=await options.render();}catch(error){await release('retry','Board preparation failed',row.message_id);throw error;}
+ try{input=await options.render();if(replace)displayHash=await mealDisplayHash(input);}catch(error){await release('retry','Board preparation failed',row.message_id);throw error;}
  // Includes date/slot transitions during image downloads and configuration changes.
  if(!await valid()){await release('idle',null,row.message_id);return;}
+ const incomplete=options.complete&&!options.complete();
+ if(replace&&row.message_id&&row.display_hash===displayHash){
+  // Retry missing images without notifying again when the displayed fallback is unchanged.
+  await release(incomplete?'retry':'ready',incomplete?'Image preparation incomplete':null,row.message_id,true,incomplete?new Date(Date.now()+15*60_000).toISOString():null);
+  return;
+ }
  let outcome=await send(env,channel,input,replace?null:row.message_id);
  if(outcome.state==='missing'){
   const creating=await env.DB.prepare(`UPDATE ${table} SET message_id=NULL,state='creating' WHERE guild_id=? AND channel_id=? AND lease_owner=? RETURNING guild_id`).bind(guild,channel,owner).first();
@@ -84,15 +99,15 @@ export async function updateBoard(env:Env,guild:string,channel:string,options:Bo
   outcome=await send(env,channel,input,null);
  }
  if(outcome.state==='sent'){
-  const at=new Date().toISOString(),incomplete=options.complete&&!options.complete();
+  const at=new Date().toISOString();
   if(replace&&row.message_id){
    // Persist deletion proof and the new serving ID atomically before touching the old message.
    const cleanupId=`meal-cleanup:${guild}:${channel}:${row.message_id}:${outcome.messageId}`;
    await env.DB.batch([
     env.DB.prepare("INSERT OR IGNORE INTO jobs(id,kind,payload,created_at,available_at) SELECT ?,'meal-cleanup',?,?,? FROM meal_messages WHERE guild_id=? AND channel_id=? AND lease_owner=?")
      .bind(cleanupId,JSON.stringify({guild,channel,messageId:row.message_id,replacementId:outcome.messageId}),at,at,guild,channel,owner),
-    env.DB.prepare("UPDATE meal_messages SET state=?,message_id=?,content_hash=?,projection_key=?,updated_date=?,retry_at=?,lease_owner=NULL,lease_until=NULL,error=?,updated_at=? WHERE guild_id=? AND channel_id=? AND lease_owner=?")
-     .bind(incomplete?'retry':'ready',outcome.messageId,incomplete?null:hash,key,date,incomplete?new Date(Date.now()+15*60_000).toISOString():null,incomplete?'Image preparation incomplete':null,at,guild,channel,owner)
+    env.DB.prepare("UPDATE meal_messages SET state=?,message_id=?,content_hash=?,display_hash=?,projection_key=?,updated_date=?,retry_at=?,lease_owner=NULL,lease_until=NULL,error=?,updated_at=? WHERE guild_id=? AND channel_id=? AND lease_owner=?")
+     .bind(incomplete?'retry':'ready',outcome.messageId,hash,displayHash,key,date,incomplete?new Date(Date.now()+15*60_000).toISOString():null,incomplete?'Image preparation incomplete':null,at,guild,channel,owner)
    ]);
    const cleanup=await env.DB.prepare("SELECT payload FROM jobs WHERE id=? AND state='pending'").bind(cleanupId).first<{payload:string}>();
    if(cleanup){
@@ -106,7 +121,9 @@ export async function updateBoard(env:Env,guild:string,channel:string,options:Bo
    }
    return;
   }
-  if(incomplete){
+  if(replace){
+   await release(incomplete?'retry':'ready',incomplete?'Image preparation incomplete':null,outcome.messageId,true,incomplete?new Date(Date.now()+15*60_000).toISOString():null);
+  }else if(incomplete){
    // The link-only message is real, but transient preparation has not reconciled the intended image.
    await env.DB.prepare(`UPDATE ${table} SET state='retry',message_id=?,content_hash=NULL,projection_key=?,updated_date=?,retry_at=?,lease_owner=NULL,lease_until=NULL,error='Image preparation incomplete',updated_at=? WHERE guild_id=? AND channel_id=? AND lease_owner=?`)
     .bind(outcome.messageId,key,date,new Date(Date.now()+15*60_000).toISOString(),new Date().toISOString(),guild,channel,owner).run();

@@ -106,8 +106,13 @@ describe('source-only notice archive',()=>{
   expect((await collectNoticeRaw(notice('university'))).attachments).toHaveLength(1);expect(fetcher).toHaveBeenCalledTimes(1);
   expect(fetcher.mock.calls[0][0]).toBe('https://www.sogang.ac.kr/api/api/v1/mainKo/BbsData?pkId=123');
  });
- it('does not turn transport failure, redirect or wrong content type into end-of-history',async()=>{
-  vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response('redirect',{status:302}));
-  await expect(collectNoticePage(college,2)).rejects.toThrow('Source HTTP 302');
+ it.each(['transport failure','redirect','wrong content type'])('does not turn %s into end-of-history',async(failure)=>{
+  const fetcher=vi.spyOn(globalThis,'fetch');
+  if(failure==='transport failure')fetcher.mockRejectedValue(new Error('Fixture transport failure'));
+  else if(failure==='redirect')fetcher.mockResolvedValue(new Response('redirect',{status:302}));
+  else fetcher.mockResolvedValue(new Response(page(college,2,[1],true),{headers:{'content-type':'application/json'}}));
+  const expected=failure==='transport failure'?'Fixture transport failure':failure==='redirect'?'Source HTTP 302':'Expected archive HTML';
+  await expect(collectNoticePage(college,2)).rejects.toThrow(expected);
+  expect(fetcher).toHaveBeenCalledTimes(1);
  });
 });
