@@ -85,7 +85,7 @@ export async function readManifest(output) {
 }
 export async function ingest(output,{endpoint,secret,request=requestOcr}={}) {
  validateEndpoint(endpoint);signedRequest({},secret);
- const manifest=await readManifest(output);let accepted=0,cached=0;
+ const manifest=await readManifest(output),uploads=[];let cached=0;
  for(const [index,entry] of manifest.entries.entries()){
   if(entry.cached){cached++;continue;}
   const names=paths(index,entry.mime),image=await readFile(join(output,names.imageFile));
@@ -97,9 +97,13 @@ export async function ingest(output,{endpoint,secret,request=requestOcr}={}) {
   if(!identity||!Array.isArray(identity.banner)||!Array.isArray(identity.headers)||identity.headers.length!==7||[identity.banner,...identity.headers].some(lines=>!Array.isArray(lines)||!lines.length||lines.length>12||lines.some(line=>typeof line!=='string'||!line.trim()||line.length>150)))throw new Error('Invalid OCR observations');
   // The scoped Worker endpoint independently verifies the observed date text.
   const meal=validateMeal(result.meal,entry.source);
-  await request(endpoint,secret,{action:'store',...capture(entry.source,entry.imageHash),engine:result.engine,identity:result.identity,meal});accepted++;
+  const payload={action:'store',...capture(entry.source,entry.imageHash),engine:result.engine,identity:result.identity,meal};
+  signedRequest(payload,secret);uploads.push(payload);
  }
- return {accepted,cached};
+ // Validate the entire local batch before any write. Remote writes remain sequential and idempotent,
+ // not transactional: a later network failure can still leave an earlier week accepted.
+ for(const payload of uploads)await request(endpoint,secret,payload);
+ return {accepted:uploads.length,cached};
 }
 export async function main(args=process.argv.slice(2),env=process.env) {
  const [command,...flags]=args;const cache=flags.includes('--cache');const at=flags.indexOf('--output');

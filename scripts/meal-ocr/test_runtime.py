@@ -20,16 +20,17 @@ runtime = load('runtime-check')
 
 
 class BatchTests(unittest.TestCase):
-    def prepare(self, root, cached=False):
-        directory = root / 'week-0'
+    def prepare(self, root, cached=False, index=0):
+        relative = 'week-%d' % index
+        directory = root / relative
         directory.mkdir()
         image = b'fixture image bytes'
         (directory / 'source.jpg').write_bytes(image)
         source = {'start': '2026-10-12'}
         (directory / 'source.json').write_text(json.dumps(source))
         entry = {'source': source, 'imageHash': hashlib.sha256(image).hexdigest(), 'cached': cached,
-                 'mime': 'image/jpeg', 'imageFile': 'week-0/source.jpg',
-                 'sourceFile': 'week-0/source.json', 'resultDirectory': 'week-0/ocr'}
+                 'mime': 'image/jpeg', 'imageFile': relative + '/source.jpg',
+                 'sourceFile': relative + '/source.json', 'resultDirectory': relative + '/ocr'}
         (root / 'manifest.json').write_text(json.dumps({'version': 'ocr-v1', 'entries': [entry]}))
         return entry
 
@@ -61,6 +62,50 @@ class BatchTests(unittest.TestCase):
                 summary = json.loads((root / 'batch-summary.json').read_text())
                 self.assertEqual(summary['runtimeVerified'], returncode == 0)
 
+    def test_timeout_is_failed_processing_not_runtime_verification(self):
+        with tempfile.TemporaryDirectory() as path:
+            root = Path(path)
+            self.prepare(root)
+            timeout = batch.subprocess.TimeoutExpired('fixture-engine', 600)
+            with patch.object(batch.subprocess, 'run', side_effect=timeout) as invoke:
+                self.assertEqual(batch.run(root, require_processed=True), 1)
+                self.assertEqual(invoke.call_args.kwargs['timeout'], 600)
+            summary = json.loads((root / 'batch-summary.json').read_text())
+            self.assertEqual(summary['outcomes'], [{'index': 0, 'status': 'timeout'}])
+            self.assertEqual(summary['failed'], 1)
+            self.assertEqual(summary['processed'], 0)
+            self.assertFalse(summary['runtimeVerified'])
+
+    def test_failed_first_week_does_not_hide_second_week(self):
+        for first in (SimpleNamespace(returncode=1), batch.subprocess.TimeoutExpired('fixture-engine', 600)):
+            with self.subTest(first=type(first).__name__), tempfile.TemporaryDirectory() as path:
+                root = Path(path)
+                entries = [self.prepare(root, index=index) for index in range(2)]
+                (root / 'manifest.json').write_text(json.dumps({'version': 'ocr-v1', 'entries': entries}))
+                with patch.object(batch.subprocess, 'run', side_effect=[first, SimpleNamespace(returncode=0)]) as invoke:
+                    self.assertEqual(batch.run(root), 1)
+                    self.assertEqual(invoke.call_count, 2)
+                summary = json.loads((root / 'batch-summary.json').read_text())
+                self.assertEqual([item['status'] for item in summary['outcomes']],
+                                 ['timeout' if isinstance(first, Exception) else 'rejected', 'accepted'])
+                self.assertEqual(summary['failed'], 1)
+                self.assertEqual(summary['processed'], 1)
+                self.assertFalse(summary['runtimeVerified'])
+
+    def test_one_cached_and_one_processed_week_verifies_only_real_work(self):
+        with tempfile.TemporaryDirectory() as path:
+            root = Path(path)
+            entries = [self.prepare(root, cached=True), self.prepare(root, index=1)]
+            (root / 'manifest.json').write_text(json.dumps({'version': 'ocr-v1', 'entries': entries}))
+            with patch.object(batch.subprocess, 'run', return_value=SimpleNamespace(returncode=0)) as invoke:
+                self.assertEqual(batch.run(root, require_processed=True), 0)
+                invoke.assert_called_once()
+                self.assertIn(str(root / 'week-1/source.jpg'), invoke.call_args.args[0])
+            summary = json.loads((root / 'batch-summary.json').read_text())
+            self.assertEqual([item['status'] for item in summary['outcomes']], ['cached', 'accepted'])
+            self.assertEqual(summary['processed'], 1)
+            self.assertTrue(summary['runtimeVerified'])
+
     def test_manifest_cannot_select_arbitrary_files(self):
         with tempfile.TemporaryDirectory() as path:
             root = Path(path)
@@ -85,10 +130,13 @@ class ModelDigestTests(unittest.TestCase):
                 path.write_bytes(b'approved')
                 snapshot['model_weights'].append({'model': name, 'bytes': 8,
                                                   'sha256': hashlib.sha256(b'approved').hexdigest()})
-            self.assertEqual(len(runtime.check_weights(snapshot, home)), 4)
-            (home / paths['korean_g2']).write_bytes(b'modified')
-            with self.assertRaisesRegex(ValueError, 'Model weights changed'):
-                runtime.check_weights(snapshot, home)
+            # Model weights must be hashed from bounded file reads, not one whole-file allocation.
+            with patch.object(Path, 'read_bytes', side_effect=AssertionError('Unexpected whole-file read')):
+                self.assertEqual(len(runtime.check_weights(snapshot, home)), 4)
+            for value, message in ((b'modified', 'Model weights changed'), (b'longer modified', 'Model size changed')):
+                (home / paths['korean_g2']).write_bytes(value)
+                with self.subTest(message=message), self.assertRaisesRegex(ValueError, message):
+                    runtime.check_weights(snapshot, home)
 
 
 if __name__ == '__main__':

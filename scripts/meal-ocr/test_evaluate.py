@@ -107,7 +107,7 @@ class MetricTests(unittest.TestCase):
             evaluate.paddle_detections([Result()])
 
 
-@unittest.skipIf(Image is None, "Pillow is not installed; parent installs approved dependencies")
+@unittest.skipIf(Image is None, "Pillow required for crop integration tests")
 class CropIntegrationTests(unittest.TestCase):
     def test_crop_pixels_and_report_without_engines(self):
         with tempfile.TemporaryDirectory() as directory:

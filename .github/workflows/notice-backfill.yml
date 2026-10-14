@@ -35,7 +35,7 @@ jobs:
             echo "::error::Enable NOTICE_ARCHIVE_ENABLED and configure the ingestion URL and shared secret before backfill."
             exit 1
           fi
-      - run: npm ci
+      - run: npm ci --omit=dev
       - name: Capture and notify recent notices before historical import
         id: recent
         continue-on-error: true

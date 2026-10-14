@@ -1,83 +1,51 @@
-# Meal OCR pipeline and manual evaluation
+# Meal OCR pipeline
 
-## Replacement pipeline (staged, not deployed)
+Commands below run from the repository root. Development/safety rules are in [AGENTS.md](../../AGENTS.md); operating evidence is in [VERIFICATION.md](../../docs/VERIFICATION.md).
 
-`pipeline.py` detects the supported table family's ruling lines, crops individual
-days, and requires independently observed banner dates and all seven column
-month/day/weekday headers. PaddleOCR runs first; EasyOCR runs once if the engine
-or date checks fail. Menu spelling is not a fallback trigger. Missing/merged day
-boundaries suppress affected offerings rather than moving text between dates.
+## Active pipeline and responsibilities
 
-`cross-week-evaluation.json` records seven actual source-image tests: six accepted
-(including two month transitions), one rejected for a stale banner. October 12–18
-used EasyOCR after PaddleOCR missed a complete weekday. Review crops under
-`output/pipeline-final-<week-start>/`, including `selected_day_<0..6>.png`.
+GitHub Actions runs **CPU PaddleOCR first, EasyOCR fallback**; the Worker validates signed results into the existing D1 weekly cache. No meal OpenRouter path remains. `pipeline.py` detects table ruling lines and requires independently observed banner dates and all seven column month/day/weekday headers. Menu spelling is not a fallback trigger. Missing/merged boundaries suppress affected offerings rather than inventing menus or moving text across dates.
 
-The local pipeline emits the existing seven-day `MealWeek` plus observed identity,
-engine, hash and `ocr-v1`. This is serving-compatible **candidate data**, not an
-automatic upload. The Worker independently checks observations on ingestion.
+The output is a seven-day `MealWeek`, observed identity, engine, image hash and `ocr-v1`. Local output is **candidate data**, not an automatic upload; the Worker independently checks dates, identity and meal semantics. Only current+next KST Monday–Sunday weeks are retained. Dependency/model caches accelerate execution but are not serving truth.
+
+`.github/workflows/meal-ocr.yml` refreshes at **06:40 / 17:10 KST** (21:40/08:10 UTC) with ingestion enabled. Manual dispatch defaults to `ingest=false`. Worker meal reports are independently planned at07:00/17:30 KST; GitHub delays mean the20-minute buffer is not a guarantee.
+
+The workflow uses Ubuntu24.04/Python3.11 and `requirements-actions.lock`. Native verification exercises **both** engines and checks four reviewed weight digests in `evaluation-summary.json`. Manual verification also requires at least one real processed source; empty/cache-only work does not prove OCR runtime. Scheduled ingestion may legitimately reuse an exact cache match. Artifacts retain bounded results/diagnostics for three days, not source images or third-party engine logs. Changed weight digests require review.
+
+## Tests without live collection or ingestion
 
 ```sh
-# Downloads verified official sources; does not contact ingestion or Discord.
+npm run test:ocr  # standalone Node ingestion-client tests; also included in npm run check
+python3 -m unittest discover -s scripts/meal-ocr -p 'test_*.py' -q
+
+# Full geometry/crop tests, using an already installed approved environment:
+scripts/meal-ocr/.venv/bin/python -m unittest discover -s scripts/meal-ocr -p 'test_*.py' -q
+```
+
+Ordinary CI runs the Node client and Python3.11 stdlib tests. Python image/geometry tests explicitly skip when Pillow/OpenCV are unavailable; a passing lightweight run is not full geometry coverage. The pinned OCR workflow retains the full test step. Synthetic tests use injected engines and do not prove real Korean recognition, native package compatibility or future image layouts.
+
+## Local real-source processing
+
+Preparing sources makes **real read-only HTTPS requests** and downloads official source images. Processing uses the already approved OCR environment; native initialization may download official weights and requires download approval. These commands do **not** upload results or post to Discord:
+
+```sh
 NODE_EXTRA_CA_CERTS=certificates/sogang-ov-r36.pem \
   node scripts/meal-ocr/collect.mjs prepare --output scripts/meal-ocr/output/new-run
 scripts/meal-ocr/.venv/bin/python scripts/meal-ocr/run-batch.py \
   --output scripts/meal-ocr/output/new-run --require-processed
-
-# Synthetic tests and the standalone Node client tests:
-scripts/meal-ocr/.venv/bin/python -m unittest discover -s scripts/meal-ocr -p 'test_*.py' -q
-node --test scripts/meal-ocr/collect.node-tests.mjs
 ```
 
-The optional `prepare --cache` and `ingest` commands contact the scoped Worker
-endpoint and mutate D1. The user approved operational activation on 2026-10-13. They require
-`MEAL_OCR_INGEST_URL` ending in `/internal/meal-ocr` and a dedicated
-`MEAL_OCR_INGEST_SECRET` (at least 32 characters) in both Actions and Worker.
-The authenticated lookup captures source metadata and refreshes only an exact
-cache identity. Store is idempotent and conditionally matches current source
-metadata inside a D1 transaction. Neither creates Discord delivery jobs.
+Input is one PNG/JPEG frame, at most5 MiB and20 million pixels. Image bytes/crops are local ignored artifacts, not D1 source identity. Preserve canonical official article identity, including when the article contains an inline PNG. Do not substitute stale weeks or repair contradictory observed dates from article metadata.
 
-`.github/workflows/meal-ocr.yml` refreshes at 06:40/17:10 KST (21:40/08:10 UTC)
-with ingestion enabled. Manual dispatch retains `ingest=false` by default. Worker
-reports are independently planned at 07:00/17:30 KST. GitHub schedules can be
-delayed/dropped; a 20-minute buffer does not guarantee completion before reports.
-It uses Ubuntu 24.04/Python 3.11 and the separate CPU-targeted
-`requirements-actions.lock`. Pip/model caches are expendable accelerators;
-existing D1 is the authoritative current+next KST-week result cache. Native runtime
-verification initializes and exercises **both** engines and checks the four
-snapshotted weight-file digests in `evaluation-summary.json`. Date/crop processing
-must also accept at least one real source; an empty batch cannot verify runtime.
-Artifacts contain only results/diagnostics for three days, no source images or
-third-party engine logs. A changed weight digest requires review, not silent use.
+### Live cache/ingestion boundary
 
-**Actual Actions/Linux verification passed** in [run 38345856766](https://github.com/Hiyabye/SogangFriends/actions/runs/38345856766)
-on Ubuntu 24.04/Python 3.11. Both CPU engines ran, all four weight digests matched,
-and October 12–18 was accepted with EasyOCR after Paddle missed a weekday.
-`actions-verification.json` records reviewed provenance and observed dates;
-Worker regression tests independently accept its identity. This was `ingest=false`:
-no D1 writes, Discord posts, OpenRouter calls or deployment. The staged OCR commit
-was pushed with approval. The user subsequently approved retirement push,
-dedicated-secret setup, deployment, live ingestion and scheduled refreshes/reports.
-See `docs/VERIFICATION.md` for the actual operational execution record.
+`prepare --cache` and `ingest` contact the Worker and **mutate D1**. Prior activation is not blanket approval for another manual run. They require `MEAL_OCR_INGEST_URL` ending in `/internal/meal-ocr` and the same dedicated `MEAL_OCR_INGEST_SECRET` (at least32 characters) in Actions/Worker. Neither creates Discord delivery jobs.
 
-## Original diagnostic tool
+Lookup captures source metadata and refreshes only an exact cache identity. Store conditionally matches current source metadata in a D1 transaction. Before the first store request, `ingest()` validates the **entire bounded local batch**: source/image hashes, result files, observed identity, meal semantics and signed-request limits. It then sends sequential, idempotent week writes. This is **not a multi-week remote transaction**: a later network or Worker rejection can leave an earlier valid week stored. Reuse the same reviewed identities rather than resetting state after partial progress.
 
-`evaluate.py` is an isolated local diagnostic tool, not the Worker meal extractor. It does
-not call OpenRouter, Discord, D1, or any serving-cache endpoint. It produces no
-meal availability JSON and never retries historical jobs.
+## Environment and retained evidence
 
-Python 3.9 and Pillow are required for cropping. OCR engines are imported only
-when selected. Use the separately approved/pinned environment prepared by the
-operator; the tool itself does not install packages. PaddleOCR/EasyOCR may
-**download their official model weights at initialization**. This is not an
-image upload, but requires download approval and network access on first use.
-
-## Reproducible environment
-
-The checked baseline uses Python 3.9.6 on macOS arm64. Python 3.9 is an evaluation
-compatibility baseline, not a recommendation for a new production runtime.
-`requirements.lock` pins all resolved packages and hashes; other Python/platform
-combinations need their own compatibility check. No npm/Worker dependencies change.
+The Actions Linux CPU lockfile and macOS arm64 `requirements.lock` serve different environments; do not interchange them. Python3.9.6 is the checked local compatibility baseline, not a recommendation for a new production runtime. Installation and first-use model downloads require approval:
 
 ```sh
 python3 -m venv scripts/meal-ocr/.venv
@@ -85,144 +53,46 @@ scripts/meal-ocr/.venv/bin/python -m pip install --require-hashes \
   -r scripts/meal-ocr/requirements.lock
 ```
 
-The virtual environment, downloaded source images, and diagnostic output are ignored
-by Git. The Actions lock resolves Linux CPU Torch/Torchvision from the official
-PyTorch CPU index; the macOS lock is separate and must not substitute for it. Official weights may also be cached under `~/.paddlex` and `~/.EasyOCR`.
+Official weights may be cached under `~/.paddlex` / `~/.EasyOCR`; the venv, source images and output are Git-ignored. Keep these reviewed artifacts:
 
-## Usage
+| Artifact | Purpose |
+|---|---|
+| `evaluation-summary.json` | Native runtime's approved model-weight digests and original comparison evidence |
+| `actions-verification.json` | Reviewed Linux/Actions provenance and observed dates, consumed by Worker regression tests |
+| `cross-week-evaluation.json` | Seven-week evaluation: six accepted, one stale-banner rejection, including month transitions |
+| `layout-941660.json`, `truth-2026-10-13.json`, `truth-2026-10-17.json` | Original week-specific reviewed geometry/transcriptions, not future-week templates |
+| [EVALUATION.md](EVALUATION.md) | Source hashes, measurements and comparison rationale |
+
+Activation and actual Linux/live-ingestion runs are recorded once in [VERIFICATION.md](../../docs/VERIFICATION.md). Retired inference trial details are historical evidence, not instructions to recreate those paths. The local meal display-hash migration0011 concerns report deduplication only; it has not been remotely applied and does not alter OCR ingestion.
+
+## Diagnostic CLI and shared helpers
+
+`evaluate.py` is both a local crop/transcription diagnostic CLI **and a shared helper module imported by `pipeline.py`**. Do not remove it as unused legacy. Its CLI does not call model services, Discord, D1 or ingestion; it emits no serving meal-availability JSON and never retries historical jobs. OCR engines are imported only when selected.
 
 ```sh
 python scripts/meal-ocr/evaluate.py \
   --image /path/to/official-menu.jpg \
-  --layout /path/to/reviewed-layout.json \
-  --date 2026-10-13 \
-  --engine none \
-  --output /tmp/meal-crop-tuesday
-
-# In the approved OCR environment, use --engine paddle, easy, or both.
-# Add --truth /path/to/tuesday-truth.json for transcription metrics.
-python -m unittest discover -s scripts/meal-ocr -p 'test_*.py' -v
-```
-
-Output must be a fresh directory. The original image is not copied; only selected
-crops and `result.json` are written. Input is limited to one PNG/JPEG frame, 5 MiB,
-and 20 million pixels. The selected-day crop is a visual-review artifact, not
-submitted to engines; engines process the smaller named crops individually.
-Engine initialization time (including possible downloads) is separate from
-per-crop inference time. No latency or memory budget is promised.
-
-## Layout JSON contract
-
-All geometry is **operator-reviewed input**, not automatically detected table
-boundaries or proof of dates observed in the image. A layout is specific to its
-reviewed week and geometry. Do not reuse it on future images merely because their
-aspect ratios match: shifted/changed tables can pass that check.
-
-```json
-{
-  "start": "2026-10-12",
-  "end": "2026-10-18",
-  "aspect_ratio": 2.0,
-  "aspect_tolerance": 0.01,
-  "day_boundaries": [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9],
-  "banner": [0.3, 0.02, 0.8, 0.09],
-  "labels": [0.05, 0.1, 0.19, 0.9],
-  "regions": {
-    "day_header": [0.1, 0.2],
-    "breakfast_korean": [0.2, 0.35],
-    "breakfast_western": [0.36, 0.5],
-    "breakfast_common": [0.51, 0.55],
-    "cup_rice": [0.56, 0.6],
-    "dinner": [0.61, 0.85],
-    "drinks": [0.86, 0.9]
-  }
-}
-```
-
-This example is **synthetic**, not the real menu profile.
-
-- Normalized coordinates are measured from top-left: X/image width, Y/image height.
-- `aspect_ratio` is width/height; tolerance is relative, 0–0.05.
-- Eight X boundaries delimit seven Monday–Sunday columns, **excluding** left labels.
-- Rectangles are `[left, top, right, bottom]`.
-- Region spans are `[top, bottom]`, in the exact order shown. Calorie-row gaps may
-  be excluded. Ranges must be ordered and non-overlapping.
-- `banner` should contain only the observed year/date-range text. Exclude source
-  authors/contact information, decorative logos, and footer. `labels` must be to
-  the left of the day columns and within the reviewed table's vertical bounds.
-- Day-specific regions use only the selected column. `breakfast_common` and
-  `drinks` use the **full seven-column span**, preserving merged shared rows.
-- `selected_day.png` spans the selected column from the header to the drinks row.
-  `banner.png`, `labels.png`, and each named region are also saved separately.
-
-Dates must be canonical YYYY-MM-DD; the profile must cover one Monday–Sunday
-week and the requested date must be in that week. The output explicitly marks
-identity as `unverified`: the requested/profile dates are not OCR-confirmed.
-
-## OCR and result format
-
-Paddle uses `PaddleOCR(text_detection_model_name="PP-OCRv5_server_det",
-text_recognition_model_name="korean_PP-OCRv5_mobile_rec", device="cpu")`, with
-orientation/unwarping disabled. EasyOCR uses `Reader(["ko", "en"], gpu=False)`.
-
-For each engine, `result.json` contains package versions, CPU device,
-initialization duration, and per-crop detections (`box`, `text`, `confidence`),
-ordered `lines`, and inference duration. Bounding boxes are **crop-local** pixel
-coordinates. Crop rectangles and source/layout SHA-256 hashes preserve provenance.
-No text is corrected, interpreted as available/closed, or reassigned to dates.
-
-## Optional human ground truth
-
-Use an object keyed by crop name, with arrays of lines in top-to-bottom,
-left-to-right order:
-
-```json
-{
-  "day_header": ["10월 13일", "화요일"],
-  "cup_rice": ["11:40", "참치콘샐러드덮밥"],
-  "dinner": ["manually transcribed line 1", "manually transcribed line 2"],
-  "drinks": ["manually transcribed shared row"]
-}
-```
-
-`[]` represents a genuinely blank reviewed crop. Omitted keys are **not scored**.
-Only named OCR crops are scored; `selected_day` is visual-only and is reported in
-`unevaluated_truth_crops` if supplied. The sample above is illustrative, not a
-complete menu truth set.
-
-Metrics concatenate lines, normalize Korean to NFC, remove whitespace, and
-compute character-level Levenshtein edits and character error rate. Blank truth
-has no CER denominator (`null`); unexpected detected text is flagged separately.
-CER is not menu accuracy: it can be affected by line ordering, joined detection
-boxes, symbols, and omissions. Confidence is not a factual correctness guarantee.
-Review wrong-day assignment, blank-cell handling, dates, and actual text against
-the original image before deciding on a production pipeline.
-
-## Reviewed source evaluation
-
-`layout-941660.json` and `truth-2026-10-13.json` / `truth-2026-10-17.json`
-are specific to official post 941660, week 2026-10-12–18. The checked source hash,
-measured results, model hashes, and comparison rationale are in
-[EVALUATION.md](EVALUATION.md) and `evaluation-summary.json`. Source spelling is
-preserved, including the printed Saturday words `베이리` and `슬리이스치즈`.
-These are not corrected menu outputs or a reusable future-week layout detector.
-
-Place the official source image locally, then run, for example:
-
-```sh
-scripts/meal-ocr/.venv/bin/python scripts/meal-ocr/evaluate.py \
-  --image /path/to/20261008_0923_5910001.jpg \
   --layout scripts/meal-ocr/layout-941660.json \
-  --date 2026-10-13 --engine both \
-  --truth scripts/meal-ocr/truth-2026-10-13.json \
-  --output scripts/meal-ocr/output/new-tuesday-trial
+  --date 2026-10-13 --engine none \
+  --output /tmp/meal-crop-tuesday
 ```
 
-## Validation limits
+Use a fresh output directory. `--engine none` crops without loading OCR engines; approved runs may use `paddle`, `easy` or `both`. Add `--truth /path/to/reviewed-truth.json` for transcription metrics. Engine initialization/download time is separate from crop inference; no latency/memory budget is promised.
 
-Synthetic tests validate crop geometry, aspect/date rejection, shared-row
-preservation, normalization/metrics, and Paddle result conversion. Pillow-dependent
-integration tests skip explicitly if Pillow is absent. These tests do not measure
-real Korean recognition, model downloads, package compatibility, GPU behavior,
-or future-week layout robustness. Real engine evaluation is a separate approved
-operator action.
+### Reviewed layout contract
+
+The diagnostic layout is **operator-reviewed geometry**, not detected boundaries or OCR-confirmed dates. See `layout-941660.json` for the real example tied to official post941660/week2026-10-12–18. Do not reuse it merely because a future image's aspect ratio matches.
+
+- Canonical `start`/`end` cover one Monday–Sunday week; the requested date must belong to it.
+- Coordinates are normalized from top-left. Rectangles are `[left,top,right,bottom]`; region spans are `[top,bottom]`.
+- `aspect_ratio` and relative `aspect_tolerance` (0–0.05) reject different shapes; eight `day_boundaries` delimit seven columns, excluding labels.
+- `banner` selects observed year/date text, not authors, contacts or decoration. `labels` stays left of day columns within the table's vertical bounds.
+- Ordered, nonoverlapping `regions`: `day_header`, `breakfast_korean`, `breakfast_western`, `breakfast_common`, `cup_rice`, `dinner`, `drinks`. Calorie gaps may be excluded.
+- `breakfast_common`/`drinks` use the full seven-column span; other crops use the selected day. `selected_day.png` is visual-review only, not submitted to engines.
+- Diagnostic identity stays `unverified`: profile/request dates are not proof of observed dates.
+
+### Engines, output and optional truth
+
+Paddle uses `PP-OCRv5_server_det` + `korean_PP-OCRv5_mobile_rec` on CPU with orientation/unwarping disabled. EasyOCR uses Korean/English with `gpu=False`. Diagnostic `result.json` records package versions, initialization/crop duration, detections (`box`,`text`,`confidence`), reading-order lines and source/layout hashes. Boxes are crop-local pixels. Diagnostic text is not corrected, marked available/closed or reassigned to dates.
+
+Ground truth is an object mapping crop names to arrays of reviewed lines. `[]` means a genuinely blank crop; omitted keys are unscored. `selected_day` truth is reported as unevaluated. Metrics normalize Korean NFC, remove whitespace and compute character edit distance/CER; blank truth has no CER denominator. CER/confidence is **not factual menu accuracy**. Compare wrong-day assignment, blank cells and observed dates with the original image. Preserve source spelling in historical transcriptions rather than silently correcting it.

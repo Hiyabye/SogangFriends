@@ -17,3 +17,12 @@ jobs:
       - run: npx wrangler deploy --dry-run --outdir /tmp/worker-build
         env:
           WRANGLER_SEND_METRICS: 'false'
+  python-stdlib:
+    name: Python stdlib tests (image tests may skip; full suite in OCR refresh)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m unittest discover -s scripts/meal-ocr -p 'test_*.py' -q

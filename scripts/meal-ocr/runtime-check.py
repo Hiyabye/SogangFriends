@@ -25,7 +25,11 @@ def check_weights(snapshot, home=Path.home()):
         item = expected[name]
         if path.stat().st_size != item["bytes"]:
             raise ValueError("Model size changed")
-        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        digest = digest.hexdigest()
         if digest != item["sha256"]:
             raise ValueError("Model weights changed")
         checked.append({"model": name, "sha256": digest})

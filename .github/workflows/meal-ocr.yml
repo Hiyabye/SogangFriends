@@ -30,7 +30,7 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-      - run: npm ci
+      - run: npm ci --omit=dev
       - name: Test the scoped ingestion client
         run: node --test scripts/meal-ocr/collect.node-tests.mjs
       - uses: actions/setup-python@v5
