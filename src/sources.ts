@@ -151,23 +151,17 @@ export function parseMealImage(input:string,article:{url:string;start:string;end
  const u=new URL(reference,article.url);if(u.protocol==='http:'&&u.hostname==='scc.sogang.ac.kr')u.protocol='https:';validateImageUrl(u.href);return u.href;
 }
 function validateImageUrl(url:string):void {const u=new URL(url);if(u.origin!=='https://scc.sogang.ac.kr'||!/^\/dataview\/board\/1185\/[^/]+\.(?:png|jpe?g)$/i.test(u.pathname)||u.search||u.hash||u.username||u.password)throw new Error('Disallowed meal image');}
-async function mealCandidates(today:string,includeUpcoming=false):Promise<Omit<MealSource,'imageUrl'>[]> {
+async function mealCandidates(today:string):Promise<Omit<MealSource,'imageUrl'>[]> {
  const candidates:Omit<MealSource,'imageUrl'>[]=[],window=mealWindow(today);
  for(let page=1;page<=2;page++){
   const u=new URL(MEAL_SOURCE_URL);u.searchParams.set('currentPage',String(page));candidates.push(...parseMealList(await html(u.href)));
   // A retained applicable source must not be blocked by irrelevant older partial weeks.
-  if(candidates.some(a=>a.start<=today&&a.end>=today||(includeUpcoming&&a.start>=window.start&&a.end<=window.end)))break;
+  if(candidates.some(a=>a.start>=window.start&&a.end<=window.end))break;
  }
  return candidates.sort((a,b)=>b.published.localeCompare(a.published));
 }
-export async function discoverMeal():Promise<MealSource> {
- const today=todayKst(new Date(Date.now())),sorted=await mealCandidates(today);
- // Preserve the legacy preference without pretending a stale/newest post covers today.
- const chosen=sorted.find(a=>a.start<=today&&a.end>=today)??sorted[0];
- return {...chosen,imageUrl:parseMealImage(await html(chosen.url),chosen)};
-}
 export async function discoverMealSources():Promise<MealSource[]> {
- const today=todayKst(new Date(Date.now())),window=mealWindow(today),candidates=await mealCandidates(today,true);
+ const today=todayKst(new Date(Date.now())),window=mealWindow(today),candidates=await mealCandidates(today);
  const retained=new Map<string,Omit<MealSource,'imageUrl'>>();
  for(const candidate of candidates)if(candidate.start>=window.start&&candidate.end<=window.end&&!retained.has(candidate.start))retained.set(candidate.start,candidate);
  const result:MealSource[]=[];

@@ -1,5 +1,5 @@
 import type { Schedule } from './types';
-import { addDays, dayDifference, todayKst, validDate } from './time';
+import { addDays, todayKst, validDate } from './time';
 
 function deadlineDate(item: Schedule): string | undefined {
   return item.deadlineDate ?? (item.deadlineAt ? todayKst(new Date(item.deadlineAt)) : undefined);
@@ -44,21 +44,4 @@ export function upcomingSchedules(items: Schedule[], today: string): Schedule[] 
   const end = addDays(today, 30);
   return items.filter(item => (item.endDate ?? deadlineDate(item) ?? item.startDate) >= today && item.startDate < end)
     .sort((a, b) => a.startDate.localeCompare(b.startDate) || a.id.localeCompare(b.id));
-}
-
-/** Start dates are not deadlines; only explicitly documented deadlines get end reminders. */
-export function dueReminders(items: Schedule[], today: string): { item: Schedule; offset: number; kind: 'start' | 'deadline'; date: string }[] {
-  if (!validDate(today)) throw new Error('Invalid reminder date');
-  return items.flatMap(item => {
-    if (item.active !== true || item.note.includes('교직원 대상')) return [];
-    const deadline = deadlineDate(item);
-    const targets: { kind: 'start' | 'deadline'; date: string }[] = [];
-    // One reminder if a period starts and ends on the same KST date.
-    if (item.type !== 'deadline' && item.startDate !== deadline) targets.push({ kind: 'start', date: item.startDate });
-    if (deadline) targets.push({ kind: 'deadline', date: deadline });
-    return targets.flatMap(({ kind, date }) => {
-      const offset = dayDifference(today, date);
-      return [7, 1, 0].includes(offset) ? [{ item, offset, kind, date }] : [];
-    });
-  });
 }

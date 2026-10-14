@@ -4,7 +4,8 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { addDays, dayDifference, todayKst, validDate } from '../src/time';
-import { dueReminders, upcomingSchedules, validateSchedules } from '../src/schedule';
+import { upcomingSchedules, validateSchedules } from '../src/schedule';
+import { scheduleCard } from '../src/schedule-card';
 import type { Schedule } from '../src/types';
 import seed from '../data/schedule.json';
 
@@ -33,46 +34,29 @@ describe('reviewed schedules', () => {
     expect(rows).toHaveLength(27);
     expect(rows.every(row => row.active === false && !row.deadlineAt)).toBe(true);
     expect(rows.find(row => row.id === '2027-entrance')?.startDate).toBe('2027-02-18');
-    expect(dueReminders(rows, '2026-11-20')).toEqual([]);
+    expect(JSON.stringify(scheduleCard(rows, '2026-11-20'))).toContain('앞으로의 승인된 학사일정이 없습니다.');
   });
   it('includes ongoing periods but excludes past events and the exclusive day-30 boundary', () => {
     const rows = [entry({ id: 'ongoing', deadlineDate: undefined }), entry({ id: 'expired', startDate: '2026-09-01', endDate: '2026-09-30', deadlineDate: undefined }), entry({ id: 'future', startDate: '2026-11-08', endDate: undefined, deadlineDate: undefined, type: 'event' })];
     expect(upcomingSchedules(rows, '2026-10-09').map(row => row.id)).toEqual(['ongoing']);
   });
-  it('only reminds D-7, D-1 and D-day and never treats every event as a deadline', () => {
-    const rows = [entry(), entry({ id: 'semester-start', deadlineDate: undefined, endDate: undefined, type: 'event' }), entry({ id: 'unapproved', active: false }), entry({ id: 'faculty', note: '교직원 대상 성적 제출 일정. 학생 신청 마감이 아님.' })];
-    expect(dueReminders(rows, '2026-10-13').map(row => row.offset)).toEqual([7]);
-    expect(dueReminders(rows, '2026-10-19').map(row => row.offset)).toEqual([1]);
-    expect(dueReminders(rows, '2026-10-20').map(row => row.offset)).toEqual([0]);
-    expect(dueReminders(rows, '2026-10-21')).toEqual([]);
-    expect(dueReminders(rows, '2026-10-18')).toEqual([]);
-    expect(rows[0].deadlineAt).toBeUndefined();
-  });
-  it('reminds exam periods and events at their start without inventing end deadlines', () => {
-    const exam = entry({ id: 'exam', startDate: '2026-10-20', endDate: '2026-10-26', deadlineDate: undefined });
-    const event = entry({ id: 'registration', startDate: '2026-10-20', type: 'event', endDate: undefined, deadlineDate: undefined });
-    for (const [today, offset] of [['2026-10-13', 7], ['2026-10-19', 1], ['2026-10-20', 0]] as const) {
-      expect(dueReminders([exam, event], today).map(({ item, kind, date, offset: actual }) => [item.id, kind, date, actual])).toEqual([['exam', 'start', '2026-10-20', offset], ['registration', 'start', '2026-10-20', offset]]);
-    }
-    expect(dueReminders([exam], '2026-10-26')).toEqual([]);
-  });
-  it('reminds both application start and explicit deadline with no same-date duplication', () => {
-    const application = entry({ startDate: '2026-11-01', endDate: '2026-11-30', deadlineDate: '2026-11-30' });
-    expect(dueReminders([application], '2026-10-25')[0]).toMatchObject({kind:'start',date:'2026-11-01',offset:7});
-    expect(dueReminders([application], '2026-11-23')[0]).toMatchObject({kind:'deadline',date:'2026-11-30',offset:7});
-    const single = entry({ startDate:'2026-10-20' });
-    expect(dueReminders([single], '2026-10-20')).toHaveLength(1);
-    expect(dueReminders([single], '2026-10-20')[0].kind).toBe('deadline');
-    expect(dueReminders([entry({type:'deadline',startDate:'2026-10-01'})], '2026-10-01')).toEqual([]);
-  });
-  it('excludes unapproved and faculty start reminders too', () => {
+  it('shows approved student schedules outside the former reminder offsets', () => {
     const start = entry({startDate:'2026-10-20',deadlineDate:undefined});
-    expect(dueReminders([{...start,active:false},{...start,id:'faculty',note:'교직원 대상'}], '2026-10-13')).toEqual([]);
+    const output = JSON.stringify(scheduleCard([
+      {...start,title:'학생 일정'},
+      {...start,id:'unapproved',title:'미승인 일정',active:false},
+      {...start,id:'faculty',title:'교직원 일정',note:'교직원 대상'},
+    ], '2026-10-08'));
+    expect(output).toContain('D-12');expect(output).toContain('학생 일정');
+    expect(output).not.toContain('미승인 일정');expect(output).not.toContain('교직원 일정');
+    expect(output).not.toContain('마감');
   });
   it('maps explicit timestamp deadlines to KST dates but rejects ambiguous or invalid timestamps', () => {
     const row = entry({ deadlineDate: undefined, deadlineAt: '2026-10-19T15:00:00Z' });
     expect(validateSchedules([row])).toHaveLength(1);
-    expect(dueReminders([row], '2026-10-20')[0].offset).toBe(0);
+    const displayed = JSON.stringify(scheduleCard([row], '2026-10-20'));
+    expect(displayed).toContain('마감 D-day');
+    expect(displayed).toContain('마감: 2026-10-20');
     for (const bad of ['2026-10-20T24:00:00+09:00', '2026-02-30T12:00:00+09:00', '2026-10-20T12:00:00', '2026-10-20T12:60:00+09:00']) expect(() => validateSchedules([entry({ deadlineDate: undefined, deadlineAt: bad })])).toThrow();
     expect(() => validateSchedules([entry({ deadlineAt: '2026-10-20T12:00:00+09:00' })])).toThrow();
   });

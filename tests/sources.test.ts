@@ -71,7 +71,11 @@ describe('official source adapters with synthetic fixtures',()=>{
  });
  it('returns the current source without inventing an unpublished next week',async()=>{
   const {discoverMealSources}=await mealDiscovery();
-  const fetcher=vi.fn(async(url:unknown)=>new Response(fixture(String(url).includes('cmsboardlist.do')?'meal-list.html':'meal-article.html'),{headers:{'content-type':'text/html'}}));vi.stubGlobal('fetch',fetcher);
+  const fetcher=vi.fn(async(url:unknown)=>{
+   const u=new URL(String(url));
+   if(u.pathname.endsWith('cmsboardlist.do')&&u.searchParams.get('currentPage')!=='1')throw new Error('Unrelated historical page must not be fetched');
+   return new Response(fixture(u.pathname.endsWith('cmsboardlist.do')?'meal-list.html':'meal-article.html'),{headers:{'content-type':'text/html'}});
+  });vi.stubGlobal('fetch',fetcher);
   const pending=discoverMealSources();await vi.runAllTimersAsync();
   expect((await pending).map(r=>r.start)).toEqual(['2026-10-12']);expect(fetcher).toHaveBeenCalledTimes(2);
  });
@@ -81,19 +85,5 @@ describe('official source adapters with synthetic fixtures',()=>{
   const fetcher=vi.fn(async(url:unknown)=>{expect(String(url)).toContain('cmsboardlist.do');return new Response(stale,{headers:{'content-type':'text/html'}});});vi.stubGlobal('fetch',fetcher);
   const pending=discoverMealSources();await vi.runAllTimersAsync();
   expect(await pending).toEqual([]);expect(fetcher).toHaveBeenCalledTimes(2);
- });
- it('stops paging after a validated current week and still rejects historical partial weeks',async()=>{
-  const {discoverMeal}=await mealDiscovery();
-  const fetcher=vi.fn(async(url:unknown)=>{
-   const u=new URL(String(url));
-   if(u.pathname.endsWith('cmsboardlist.do')){
-    if(u.searchParams.get('currentPage')!=='1')throw new Error('Unrelated historical page must not be fetched');
-    return new Response(fixture('meal-list.html'),{headers:{'content-type':'text/html'}});
-   }
-   return new Response(fixture('meal-article.html'),{headers:{'content-type':'text/html'}});
-  });vi.stubGlobal('fetch',fetcher);
-  const pending=discoverMeal();await vi.runAllTimersAsync();
-  expect((await pending).start).toBe('2026-10-12');expect(fetcher).toHaveBeenCalledTimes(2);
-  expect(()=>mealPeriod('8월 27일 ~ 8월 30일 식단','2026-08-11')).toThrow('Ambiguous meal period');
  });
 });

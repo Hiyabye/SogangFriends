@@ -36,22 +36,22 @@ Desktop and mobile HTML duplicate events; the seed includes each event once. Sta
 - `deadline`: explicit source deadline. Date-only source values remain date-only; no invented 23:59 or inferred clock time.
 - `deadlineAt` is optional for future sources that explicitly give a timezone-aware clock time. Never add it merely because a date is present.
 - Scholarship/major-change/leave-return application period ends are treated as date-only application ends. Notes make this interpretation explicit.
-- Faculty grade-submission entries remain visible but are excluded from reminders: their note carries the explicit `교직원 대상` designation. Keep that designation when editing these entries.
-- Exam periods, semester openings, course-cart and registration events produce **start-date** reminders, not invented deadline reminders. Application periods with documented deadlines have separate start and deadline reminders; same-date targets are combined. Both use D-7, D-1 and D-day. Existing deadline delivery keys are preserved; start delivery keys have a separate identity.
-- User selected start-date plus deadline reminders on 2026-10-10. These reminders use reviewed calendar data only; no LLM calls or automatic calendar scraping occur.
-- `/schedule` window includes today and ongoing periods, excludes the day at today+30. D-7, D-1 and D-day use KST calendar dates; they do not claim a precise cutoff hour.
+- Faculty grade-submission entries are retained in the reviewed data but excluded from the automatic student-facing board: their note carries the explicit `교직원 대상` designation. Keep that designation when editing these entries.
+- The current automatic board displays **all approved upcoming student schedules**, including entries more than 30 days away and ongoing periods. It labels start dates, ongoing periods and explicit application deadlines without inventing end deadlines for exams or events. Countdown labels use KST calendar dates, not a precise cutoff hour.
+- The board's initial daily creation window starts at **07:30 KST**; subsequent 15-minute polls PATCH only changed content. A missed initial window is not replayed. The earlier D-7/D-1/D-day selective-notification design is historical; it no longer has a runtime planner. No LLM calls or automatic calendar scraping occur.
+- `/schedule` is a separate 30-day query: today and ongoing periods are included, the day at today+30 is excluded. This query does not activate automatic posting.
 
 ## Import and activation
 
 1. Review `data/schedule.json` against the official headquarters page, including student/faculty audience and application-period deadline interpretations.
 2. `npm run schedule:import` generates `data/schedule.sql` locally with notifications disabled. It executes no database or remote command.
-3. Only after human approval, `npm run schedule:import -- --approve` generates approved rows; faculty-grade reminders remain inactive.
-4. Apply the resulting SQL to the project's own D1 via the deployment README. Generation is an explicit step, not a CI deployment action.
+3. Only after human approval, `npm run schedule:import -- --approve` generates approved rows; faculty-grade entries remain inactive.
+4. Apply the resulting SQL to the project's own D1 using the [agent development instructions](../AGENTS.md#schedules). Generation is an explicit step, not a CI deployment action.
 5. Updating the same ID uses UPSERT. Imports intentionally **do not delete missing IDs**: mark obsolete entries inactive rather than assuming removal cancels data already in D1.
 
 Optional `--input=PATH` and `--output=PATH` support reviewed replacement files. The importer evaluates only the project's own trusted TypeScript validators via the already-installed TypeScript compiler; schedule JSON is data and never executable code.
 
-The importer overrides `active` based on its explicit approval flag; an `active:true` JSON edit alone cannot silently activate an ordinary import. Runtime reminders additionally require `active === true`. Delivery idempotency and handling edits after an already-sent reminder belong to the durable outbox, not these date-selection helpers.
+The importer overrides `active` based on its explicit approval flag; an `active:true` JSON edit alone cannot silently activate an ordinary import. The automatic board additionally requires `active === true`. Daily creation, changed-content reconciliation and uncertain POST handling belong to the durable board tracking, not the schedule data validator.
 
 ## Verification boundary
 
