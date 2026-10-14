@@ -74,9 +74,13 @@ export interface DiscordImageEmbed {
  footer?:{text:string};image?:{url:string};
 }
 export interface DiscordImageFile { filename: string; bytes: Uint8Array; mime: string }
-export type DiscordMessageInput = string | { content: string; embeds?: DiscordImageEmbed[]; file?: DiscordImageFile; files?: DiscordImageFile[] };
-export function message(input: DiscordMessageInput): { content: string; allowed_mentions: { parse: never[] }; embeds?: DiscordImageEmbed[]; attachments?: {id:number;filename:string}[] } {
+export type DiscordCardComponent = {type:10;content:string} | {type:12;items:{media:{url:string}}[]} | {type:17;accent_color:number;components:DiscordCardComponent[]};
+export type DiscordMessageInput = string | { content: string; embeds?: DiscordImageEmbed[]; components?: DiscordCardComponent[]; file?: DiscordImageFile; files?: DiscordImageFile[] };
+export function message(input: DiscordMessageInput): { content?: string; flags?:number; components?:DiscordCardComponent[]; allowed_mentions: { parse: never[] }; embeds?: DiscordImageEmbed[]; attachments?: {id:number;filename:string}[] } {
   const content = typeof input === 'string' ? input : input.content;
+  // Components V2 cannot include legacy content or embeds, even empty ones.
+  if(typeof input!=='string'&&input.components)return {flags:32768,components:input.components,allowed_mentions:{parse:[]},
+    attachments:(input.files??(input.file?[input.file]:[])).map((file,id)=>({id,filename:file.filename}))};
   return { content: truncate(content, 2000), allowed_mentions: { parse: [] },
     ...(typeof input !== 'string' && input.embeds ? { embeds: input.embeds } : {}),
     ...(typeof input !== 'string' && (input.file || input.files?.length) ? { attachments: (input.files??[input.file!]).map((file,id)=>({id,filename:file.filename})) } : {}) };

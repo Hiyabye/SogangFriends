@@ -3,7 +3,7 @@ import { SOURCES, collectNotices, discoverMealSources, fetchImage } from './sour
 import { formatMeal, formatMealPart, type MealPeriod } from './meals';
 import { batchNotices, discordSend, allowedGuild, type DiscordMessageInput, type DiscordImageFile } from './discord';
 import { addDays, todayKst, validDate } from './time';
-import {boardHash,updateBoard} from './message-board';
+import {boardHash,cleanupMealMessage,updateBoard} from './message-board';
 import {mealCard} from './meal-card';
 import { validateSchedules } from './schedule';
 import { updateScheduleSummary } from './schedule-summary';
@@ -91,7 +91,7 @@ export async function updateMealBoard(env:Env,guild:string,channel:string,allowC
   if(source)images.push({url:source.url,imageUrl:source.imageUrl,start:source.start,end:source.end});
  }
  const hash=await boardHash({preview,images});let complete=true;
- await updateBoard(env,guild,channel,{table:'meal_messages',field:'meals_channel',date,key:`${date}:${slot==='morning'?0:1}`,hash,allowCreate,
+ await updateBoard(env,guild,channel,{table:'meal_messages',field:'meals_channel',date,key:`${date}:${slot==='morning'?0:1}`,hash,allowCreate,replace:true,
  valid:()=>activeMealSlot()===slot,complete:()=>complete,render:async()=>mealCard(await mealReportResponse(env,date,slot,true,()=>{complete=false;}))});
 }
 export async function planCron(env:Env,scheduledTime:number) {
@@ -184,6 +184,10 @@ export async function executeJob(env:Env,job:Job) {
  case 'meal-refresh': {
  if(payload.date!==todayKst())break;
  for(const g of await recipients(env,'meals_channel'))await enqueue(env,`meal-board:${job.id}:${g.id}:${g.channel}`,'meal-board',{guild:g.id,channel:g.channel,date:payload.date,allowCreate:false});
+ break;
+ }
+ case 'meal-cleanup': {
+ await cleanupMealMessage(env,payload);
  break;
  }
  case 'meal-board': {
