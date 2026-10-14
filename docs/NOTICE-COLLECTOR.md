@@ -1,11 +1,11 @@
 # Independent notice collector
 
-## Architecture and scope
+## Scope and current operation
 
-The project-owned Node collector reads these eleven official boards using the same `src/sources.ts` catalog and parsers as the Worker:
+The project-owned Node/GitHub Actions collector uses the shared `src/sources.ts` catalog and parsers for eleven official boards:
 
 | Source ID | Official page |
-| --- | --- |
+|---|---|
 | `university` | <https://www.sogang.ac.kr/ko/academic-support/notices> |
 | `academicNotice` | <https://computing.sogang.ac.kr/ko/community/academicNotice/list> |
 | `graduateNotice` | <https://computing.sogang.ac.kr/ko/community/graduateNotice/list> |
@@ -18,77 +18,63 @@ The project-owned Node collector reads these eleven official boards using the sa
 | `conveduNotice` | <https://convedu.sogang.ac.kr/front/cmsboardlist.do?siteId=convedu&bbsConfigFK=5551> |
 | `bdataNotice` | <https://sc.sogang.ac.kr/bdata/4305.html> |
 
-The university page loads its public JSON API; the other ten lists are HTML. The big-data page embeds the official WebSTYLIST board `bbsid=5256`, which is collected directly; `4305` is the wrapper-page ID, not an article ID. Collection is bounded to 50 university entries and at most three pages per HTML board (15 regular rows per SW board page; 10 for the other HTML boards). This command is recent-list polling, **not full-history traversal**. Optional raw capture and a separately gated resumable history workflow are documented in [NOTICE-ARCHIVE.md](NOTICE-ARCHIVE.md). Original official IDs, URLs, dates and pinned-row handling are preserved. A source failure does not stop the other sources; any failure makes the process exit nonzero so Actions reports the incomplete run. With `NOTICE_ARCHIVE_ENABLED=true`, missing article bodies are captured into the existing D1 database through the authenticated archive API; no R2 bucket or Cloudflare account token is needed. Raw capture and ordinary queued-snapshot acceptance are separate outcomes. Raw-capture failure marks the run incomplete but still submits successfully collected live metadata, preserving ordinary notice polling and alerts. Disabled mode retains the original metadata-only behavior.
+All eleven sources have initialized live baselines and stored production rows; five institution channels have confirmed manual Components V2 verification messages. That does not prove full history or subsequent automatic end-to-end delivery. Current production excludes main's pending oversized-original change; see [rollout evidence](VERIFICATION.md) and [archive limits](NOTICE-ARCHIVE.md#size-limits) before deployment or upload.
 
-Node -> authenticated Worker `/internal/notices` -> durable D1/Queue -> existing baseline/deduplication/Discord delivery. The collector does not need Discord, OpenRouter or Cloudflare account API credentials. It does not call a model or directly post to Discord. First successful collection of a new board establishes a baseline and does not notify its existing posts. Existing board baselines remain intact.
+```text
+Official sources → Node → HMAC /internal/notices → D1 snapshot job → Queue → Discord
+                       └→ optional /internal/notice-archive → D1 original + index
+```
 
-The source certificate-chain defect is solved with a verified public Sectigo intermediate, **not** by disabling TLS. See [certificate provenance and checks](../certificates/README.md). No reference-repository code, feed, deployment or infrastructure is used. Playwright CLI was used for read-only inspection of the real pages, not introduced as a production browser dependency.
+The collector needs no Discord, model or Cloudflare account API token and sends no Discord messages directly. First successful collection establishes a silent baseline; stable official IDs suppress duplicate/reordered/pinned posts. Later title/link updates do not become new alerts. A source failure does not stop healthy sources, but makes the run fail. A raw-capture failure likewise reports failure without suppressing an otherwise valid recent snapshot.
 
-This collector schedules **notices only**. It does not fix or replace the separate Worker Cron used for meals, daily academic reminders and general job recovery. The previously unresolved native Cron invocation problem must still be diagnosed independently. Worker notice polling must be switched to external collection mode when deploying this ingestion path, to avoid two active collectors.
+The university list is official JSON; the other ten are HTML. Big-data wrapper `4305` embeds WebSTYLIST board `bbsid=5256`; neither is an article ID. Recent polling is bounded to **50 university rows** and **three pages per HTML board** (15 regular rows/page for SW boards, 10 for the others), not full-history traversal.
 
-## Local read-only verification
+Node uses one scoped, verified public intermediate to fix the official site's incomplete certificate chain. Never disable TLS or add unrelated trust material; see [certificate provenance](../certificates/README.md). There is no dependency on reference repositories' code, feeds or infrastructure.
 
-Node 24 or newer and the project's existing npm dependencies are required:
+## Schedule and read-only checks
+
+`.github/workflows/notices.yml` runs at **09:10, 15:10, 21:10 and 03:10 KST** (00:10/06:10/12:10/18:10 UTC), sharing serialized `notice-collector` concurrency with backfill, without cancellation. Its thirty-minute timeout allows initial raw capture. GitHub schedules may be delayed or disabled; monitor freshness rather than treating cron as an SLA.
+
+Worker Cron is separately active every **15 minutes** for meal/schedule planning and job recovery. `NOTICE_COLLECTION_MODE=external` skips both newly planned and previously queued direct notice collection; do not run two collection paths. External polling does not replace Worker recovery.
+
+From the repository root, with Node24+ and dependencies installed:
 
 ```sh
 npm run notices:collect -- --dry-run
 ```
 
-No arguments also defaults to dry-run. The launcher scopes `NODE_EXTRA_CA_CERTS=certificates/sogang-ov-r36.pem` to this Node process. Output contains source IDs and counts only, never source authors, upstream bodies or credentials. This command still makes read-only official website requests, so do not run it in a tight loop.
+No arguments also means dry-run. This performs **real read-only HTTPS requests**, not fixture tests. The launcher scopes `NODE_EXTRA_CA_CERTS=certificates/sogang-ov-r36.pem` to Node; startup rejects missing/wrong CA configuration and `NODE_TLS_REJECT_UNAUTHORIZED=0`. Output contains source IDs/counts, not authors, credentials or full upstream bodies. Avoid tight polling loops.
 
-There is no insecure TLS fallback. Startup rejects missing/wrong CA configuration, weak send secrets, bad URL settings and `NODE_TLS_REJECT_UNAUTHORIZED=0`.
+## Upload configuration and approval
 
-## Setup before production upload
+Production is already configured; these are requirements for a new environment, not instructions to repeat activation. **Secret changes, Git push, deployment, workflow dispatch and uploads need approval.** Do not deploy current main wholesale: production build `45de078` deliberately excludes `9c90edd`/migration0009, and local0011 also awaits rollout.
 
-**Implementation and offline tests do not activate the workflow, configure secrets, deploy, or send snapshots. Obtain explicit user approval for those actions.**
+1. Configure the **same** dedicated `NOTICE_INGEST_SECRET` in Worker and Actions, privately. Keep the existing D1/Queue/baselines. Do not paste secrets into chat, Git, command arguments or logs.
+2. Deploy the approved Worker/schema with `NOTICE_COLLECTION_MODE=external`. Raw capture additionally requires its own matching schema and flag; follow [NOTICE-ARCHIVE.md](NOTICE-ARCHIVE.md).
+3. Set Actions variable `NOTICE_INGEST_URL` to exactly `https://<worker>.workers.dev/internal/notices`. The same-named secret is a fallback; the variable takes precedence. No URL credentials, query, fragment or redirects.
+4. Push only reviewed, approved code. Confirm repository Actions/billing policy before activation; included minutes are not unlimited or a permission to incur cost.
+5. After an approved run, inspect source counts and `/status` or D1 results. HTTP202 means durable snapshot acceptance, **not** Queue completion, raw archival or a Discord post. New source baselines must not broadcast old records.
 
-1. Set `NOTICE_INGEST_SECRET` using `npx wrangler secret put NOTICE_INGEST_SECRET`, then deploy (`npm run deploy`) with `NOTICE_COLLECTION_MODE = "external"` in `wrangler.toml`. Keep the existing D1 and Queue; do not create replacement resources or reset source baselines.
-2. Generate a dedicated random shared secret locally, for example `openssl rand -hex 32`. Do not paste it into chat, Git or a shell command argument. Set the same value as Worker secret `NOTICE_INGEST_SECRET` and GitHub repository Actions secret `NOTICE_INGEST_SECRET`. This secret permits submission of notices and must remain private.
-3. Set GitHub Actions **variable** `NOTICE_INGEST_URL` to the exact HTTPS production URL (an Actions secret with the same name also works; the variable takes precedence):
-
-   ```text
-   https://<your-worker>.workers.dev/internal/notices
-   ```
-
-   No URL credentials, query string or fragment. Never put the authentication secret in the URL. The script refuses other paths and never follows an ingestion redirect.
-4. Push the reviewed code/workflow to the project's own GitHub repository **only after approval**. Scheduled workflows run from the default branch. Check GitHub Actions availability and billing for the repository before enabling it; private-repository usage may consume included minutes or incur charges. No paid service is assumed.
-5. Run the `collect notices` workflow manually once through `workflow_dispatch`, then inspect its eleven source counts and Worker `/status`/D1 outcomes. An HTTP 202 confirms durable acceptance, not completion of downstream processing or Discord delivery.
-6. Confirm successful collection of all eleven IDs. Use `/notices source:university`, `/notices source:graduateNotice`, etc. The new boards should not broadcast their pre-existing posts on baseline.
-
-The scheduled workflow runs at **00:10, 06:10, 12:10 and 18:10 UTC** (09:10, 15:10, 21:10 and 03:10 KST). GitHub schedules may be delayed, and inactive public repositories may have schedules disabled; monitor `/status` freshness rather than treating the cron expression as an SLA. Concurrency is serialized without canceling an in-progress collection; the job timeout is thirty minutes to allow initial raw capture. Each run fetches directly from official sources, without relying on an old repository's output.
-
-For an explicitly approved local upload, securely load the endpoint and shared secret into the local process environment and run:
+For an explicitly approved local upload, securely set the endpoint/shared secret in the process environment:
 
 ```sh
 npm run notices:collect -- --send
 ```
 
-Cloudflare's stored secret is not automatically available to this local Node process. Keep `NOTICE_INGEST_SECRET` in Actions secrets; the endpoint URL can use Actions variables. Unset local secret variables when finished.
+Worker-stored secrets cannot be read into the local process automatically. No Cloudflare write token belongs in these Actions jobs.
 
-## Authentication, bounded retries and idempotency
+## Authentication and retries
 
-Each source is submitted separately as JSON:
-
-```json
-{"source":"university","notices":[{"id":"123","source":"university","title":"...","published":"2026-10-09","url":"https://www.sogang.ac.kr/ko/detail/123?bbsConfigFk=2"}]}
-```
-
-Headers:
+Each source is submitted as JSON with `source` and `notices`; every notice has official `id`, matching `source`, `title`, canonical `published` date and official `url`. Headers:
 
 - `content-type: application/json`
 - `x-collector-timestamp`: 13-digit Unix milliseconds
-- `x-collector-signature`: lowercase HMAC-SHA256 hex, using the UTF-8 shared secret over the **exact** bytes of `${timestamp}.${body}`
+- `x-collector-signature`: HMAC-SHA256 hex over the **exact** `${timestamp}.${body}` bytes
 
-The Worker bounds body read time to ten seconds, checks timestamps against a five-minute window both before reading and immediately before acceptance, and validates the authenticated payload before storing it. Ingestion size is bounded to 256 KiB and 100 notices per snapshot. The collector retries transport ambiguity, HTTP 429 or HTTP 5xx up to **three total attempts**, reusing the identical body, timestamp and signature. Thus retries address the same durable idempotency key; they do not deliberately regenerate a signature to make duplicate work look new. Each HTTP attempt times out after twenty seconds. Default waits are one then two seconds; valid server Retry-After values up to thirty seconds are honored. A longer requested wait stops that source's upload instead of retrying too early or running beyond a bounded window.
+The Worker allows **256 KiB / 100 notices per snapshot**, a ten-second body-read deadline and a five-minute signature window, checked again before acceptance. The client makes at most **three attempts**, reusing identical signed bytes after transport ambiguity, 429 or 5xx. Each request times out after20 seconds. Waits default to1/2 seconds; valid Retry-After up to30 seconds is honored, while longer waits stop that source rather than retrying early. Redirects, auth/other4xx and unexpected non202 responses are terminal. Response bodies and transport exception details are not logged; classifications distinguish collection from upload failure.
 
-Redirects, authentication errors, other 4xx, and unexpected non-202 success responses are terminal for that source. Response bodies and transport exception details are not logged. Source failure logs identify `collect` versus `upload` so operators can check credentials/deployment separately from official-site collection.
+Accepted snapshots expire after30 minutes. Caught processing failures use native Queue retry delays120/240 seconds, at most three D1 claims, without waiting for Cron. Crash/lease recovery and delayed delivery retries still depend on Worker Cron. Stable snapshot and source/notice keys prevent duplicate work after an ambiguous acceptance response. A Discord POST with unknown outcome remains `uncertain`, never an automatic retry; exact-once external delivery is not guaranteed.
 
-Accepted snapshots expire after thirty minutes rather than replaying old data indefinitely. Caught transient snapshot-processing failures use native per-message Queue retry delays (120 then 240 seconds, at most three D1 claims), so these retries do not need Worker Cron. Crash/lease recovery and delayed downstream delivery retries still rely on the existing recovery/dispatch machinery; external scheduling does not solve those separately. A durable snapshot ID and existing source/notice keys prevent duplicate storage or notifications after an ambiguous accepted response. This does not guarantee exact-once Discord delivery; existing uncertain-send handling remains authoritative.
+## Verification boundaries
 
-## Verification limits
-
-Fixture tests cover fingerprint/signature/expiry, endpoint validation, HMAC bytes, exact retry reuse, retry bounds, source isolation and no-upload default. A dry-run can verify real HTTPS source collection without changing Worker or Discord state. Neither test mode proves Actions scheduling, production ingress deployment/configuration, remote Queue completion or Discord delivery. No --send execution or deployment is performed merely by adding these files.
-
-Local read-only validation on 2026-10-10 KST, Node 26.11.0, with the scoped verified CA: **50 university, 34 academicNotice, 32 graduateNotice, 32 externalInfo, 34 news, 33 career** notices collected successfully (215 total). Output contained counts only. No snapshot upload occurred. This initial local check is historical; subsequent six-board operating verification is recorded in [VERIFICATION.md](VERIFICATION.md).
-
-The five additional adapters have passed local read-only HTTPS collection and raw-detail checks, including terminal historical pages. Recent counts were 49 `sweduNotice`, 2 `sweduNews`, 9 `sweduPress`, 37 `conveduNotice` and 30 `bdataNotice`. These results do not establish deployment, Actions execution or production ingestion for the additional sources. Adding them locally does not reset the existing six baselines; their first successful live snapshots establish separate silent baselines.
+`npm run check` covers fixture parsers, canonical identities, signature/freshness/body limits, exact retry reuse, source isolation, baseline/deduplication, routing and durable send behavior with mocked external calls. Read-only dry-run tests real source access but not ingress/Queue/Discord. Manual verification messages prove destination/card transport, not automatic ingestion. Historical run details and remaining live verification gaps belong in [VERIFICATION.md](VERIFICATION.md), not duplicated counts here.

@@ -1,5 +1,7 @@
 # Operator job review — 2026-10-11
 
+Historical, applied audit record. Meal inference was subsequently retired in favor of OCR; these earlier approvals do not permit restoring or replaying model calls. Current operating boundaries are in [AGENTS.md](../AGENTS.md), with rollout history in [VERIFICATION.md](VERIFICATION.md).
+
 ## Meaning and approval boundary
 
 `job_reviews` adds review annotations without rewriting `jobs.state`, attempts, errors, source baselines, rejected extraction provenance, or any `llm_usage` reservation. `closed` means the historical attempt was reviewed and will not be resumed; **it does not mean the operation succeeded or a provider problem was fixed**. `deferred` means manual investigation is still required. Matching execution state and attempt count are required for the annotation to apply in `/status`.
@@ -8,7 +10,7 @@ The following review set was approved and applied on2026-10-11, after the initia
 
 ## Shared failures and needs_review (12 rows)
 
-| Job identity | Inspected state / attempts | Proposed review | Evidence / action |
+| Job identity | Inspected state / attempts | Applied review | Evidence / action |
 | --- | --- | --- | --- |
 | `collect:university:82942` | failed / 3 | closed | Old unsupported redirect option; manual redirects implemented, current external university snapshots successful. |
 | `collect:academicNotice:82942` | failed / 3 | closed | Same old redirect failure; current snapshots successful. |
@@ -38,7 +40,7 @@ The read-only query also found23 old `interaction expired` needs_review rows (no
 ## Remaining limitations
 
 - Resolving dashboard history does not create a valid meal cache, prove real OCR quality, or resolve OpenRouter provider throttling.
-- Fresh free-model attempts remain an explicit operator choice for exhausted/uncertain past jobs, with normal limits and preserved reservations.
+- Meal model calls are retired. Preserve exhausted/uncertain jobs and reservations; do not retry them or treat these historical reviews as permission for new inference. Current meal verification uses the separately controlled OCR workflow.
 - Small menu spelling differences already pass validation. Dates/weekdays, schema and offering evidence still must pass. Unreadable offerings remain unknown.
 - No automatic factual comparison or manual edit UI was added.
 - First uncertain schedule-summary POST also requires manual message-ID reconciliation; annotation of jobs cannot substitute for that.
