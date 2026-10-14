@@ -219,3 +219,26 @@ User explicitly approved pushing and deploying all three pending changes: meal r
 Deployed Worker version `e01c94ec-502e-49ee-9ab7-f1c09f246a11` at `https://sogang-friends-bot.hiyabye0465.workers.dev`, with the existing 15-minute Cron, D1 and Queue bindings. Then pushed `main` through `5439362` so the scheduled Node collector can submit the eleven-source catalog to the compatible Worker. No migrations, resource creation, secret changes, manual collection/ingestion dispatch, new historical-backfill start, or immediate Discord test post occurred. Existing baselines/checkpoints and uncertain delivery handling remain intact. New sources establish silent baselines on their first normal successful collection; initializing their historical cursors still requires separate approval.
 
 Deployment and Git push succeeded. Actual new-source production ingestion, notice/meal client rendering, replacement cleanup and subsequent scheduled deliveries remain unverified; this rollout did not fabricate a live test to demonstrate them.
+
+
+## 2026-10-14: institution channels and approved five-notice verification
+
+The user approved production institution-channel routing and explicitly requested the latest five notices in each of five channels using Components V2. At the decision gate, the user chose to **exclude** the pending oversized-originals change and migration0009. After the original local OAuth session returned D1 error7403, user reauthentication restored access. The user also explicitly approved resetting the unavailable Discord token and replacing the Worker secret; the new value was read from ignored local `.dev.vars` without logging it. No token values are recorded here.
+
+Built in a separate detached worktree from the prior production source `7853457`, cherry-picking only channel feature `fb7f4f7`, producing build commit `45de078`. This excludes oversized-original code `9c90edd`; no application source was removed from main. The isolated build passed TypeScript, **370 tests across27 files**, and Wrangler dry-run. The full local main feature previously passed377 tests and audit reported0 vulnerabilities. Only migration **0010_notice_channels.sql** was present as pending in the isolated worktree and was applied remotely. Main's subsequent read-only checks confirmed0010 recorded,0009 absent, and no `notice_archive_raw_chunks` table.
+
+Deployed Worker **`010e9653-ee6c-443c-ba2f-47ccac4c0cbb`**, retaining the existing URL, D1, Queue and15-minute Cron. Registered all five commands in guild `1558118900347183374`; `/setup` now has eight optional channel arguments. Validated the bot token's application identity, every destination's guild and effective View/Send permissions before changing settings. Persisted these five group channels, preserving the fallback `1558121629090054174`, meals `1558121748921188502` and schedule `1558121774057521262`:
+
+| Group | Channel | Confirmed verification message |
+|---|---|---|
+| university |1559799050054799433|1559809555322376283|
+| computing |1559799078798495805|1559809578491838495|
+| swedu |1559799123903909908|1559809601380024321|
+| convedu |1559799151942959115|1559809623966482464|
+| bdata |1559799178136264754|1559809646649286679|
+
+For each group, selected five **already collected** notice rows across its constituent sources ordered by published date descending, then numeric-shaped ID length/lexical descending and source as deterministic same-date tie-breakers. No fresh upstream collection or archive ingestion was invoked, so these are the latest stored records, not a claim of minute-current official-site completeness. Reused the production card renderer, source colors, publication dates and intact official links, adding a plain Components V2 group/connection-check heading and disabling all mentions. Each group fit in one message: **five messages containing25 notices total**. No binaries or author data were sent.
+
+Each manual send first claimed a unique `operator-channel-check:2026-10-14:<group>:0` delivery in D1 as `sending`, then performed one Discord POST and recorded the confirmed message ID as `sent`. No ordinary alert jobs or live baselines were fabricated/reset, no legacy failed/uncertain deliveries were replayed, and no automatic retry was used. Discord GET readback confirmed all five messages have flags32768 and contain all five selected original links. Final D1 checks found all five manual deliveries `sent` without errors, all11 source baselines still initialized, and unchanged fallback/meal/schedule destinations. The actual Discord client appearance and a subsequent organically collected notice through the automatic Queue remain unobserved; manual sends validate destinations/card transport but are not an end-to-end automatic-ingestion test.
+
+No Git push, new Cloudflare resources, migration0009, oversized-original activation, history backfill or notice-model inference occurred. **Do not deploy current main as a follow-up without separately approving or isolating `9c90edd`.** The production build provenance above intentionally differs from main. The new Discord token remains in ignored `.dev.vars` and the Worker secret; do not disclose or commit it.
