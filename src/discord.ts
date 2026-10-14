@@ -57,7 +57,7 @@ export function authorized(interaction: unknown, env: Pick<Env, 'ALLOWED_GUILDS'
   return (BigInt(permissions) & (MANAGE_GUILD | 8n)) !== 0n;
 }
 
-function truncate(content: string, limit: number): string {
+export function truncate(content: string, limit: number): string {
   if (content.length <= limit) return content;
   const segmenter = new Intl.Segmenter('ko', { granularity: 'grapheme' });
   let output = '';
@@ -86,25 +86,28 @@ export function message(input: DiscordMessageInput): { content?: string; flags?:
     ...(typeof input !== 'string' && (input.file || input.files?.length) ? { attachments: (input.files??[input.file!]).map((file,id)=>({id,filename:file.filename})) } : {}) };
 }
 
-function display(text: string): string {
+export function display(text: string): string {
   return text.replace(/[\r\n]+/g, ' ').replace(/[\\*_`~|<>\[\]]/g, '\\$&');
 }
 
 /** Pack complete source links; overlong titles are shortened, not source URLs. */
-export function batchNotices(notices: Notice[]): string[] {
-  const output: string[] = [];
-  let current = '';
+export function noticeBatches(notices: Notice[]): {content:string;notices:Notice[]}[] {
+  const output: {content:string;notices:Notice[]}[] = [];
+  let current = ''; let rows:Notice[]=[];
   for (const notice of notices) {
     const url = new URL(notice.url);
     if (url.protocol !== 'https:' || notice.url.length > 1000) throw new Error('Invalid notice link');
     const prefix = `[${truncate(display(notice.source), 100)}] `;
     const suffix = `\n${display(notice.published)} · <${notice.url}>`;
     const block = prefix + truncate(display(notice.title), 2000 - prefix.length - suffix.length) + suffix;
-    if (current && current.length + 2 + block.length > 2000) { output.push(current); current = ''; }
-    current += (current ? '\n\n' : '') + block;
+    if (current && current.length + 2 + block.length > 2000) { output.push({content:current,notices:rows}); current = ''; rows=[]; }
+    current += (current ? '\n\n' : '') + block; rows.push(notice);
   }
-  if (current) output.push(current);
+  if (current) output.push({content:current,notices:rows});
   return output;
+}
+export function batchNotices(notices: Notice[]): string[] {
+  return noticeBatches(notices).map(batch=>batch.content);
 }
 
 export interface SendResult { state: 'sent' | 'uncertain' | 'retry' | 'failed'; messageId?: string; retryAfter?: number }

@@ -1,7 +1,8 @@
 import type { Env, Job, Notice, MealWeek, Schedule } from './types';
 import { SOURCES, collectNotices, discoverMealSources, fetchImage } from './sources';
 import { formatMeal, formatMealPart, type MealPeriod } from './meals';
-import { batchNotices, discordSend, allowedGuild, type DiscordMessageInput, type DiscordImageFile } from './discord';
+import { discordSend, allowedGuild, type DiscordMessageInput, type DiscordImageFile } from './discord';
+import {batchNoticeCards,noticeCardMessage} from './notice-card';
 import { addDays, todayKst, validDate } from './time';
 import {boardHash,cleanupMealMessage,updateBoard} from './message-board';
 import {mealCard} from './meal-card';
@@ -139,9 +140,8 @@ export async function executeJob(env:Env,job:Job) {
  case 'notice-alert': {
  // Avoid catch-up floods from jobs older than a day. Still retain notices for queries.
  if(Date.now()-Date.parse(job.created_at)>86400_000) break;
- const notices=(payload.notices as Notice[]).map(n=>({...n,source:SOURCES.find(s=>s.id===n.source)?.name??n.source}));
- const chunks=batchNotices(notices);
- for(const g of await recipients(env,'notices_channel')) for(let i=0;i<chunks.length;i++) await deliveryIntent(env,`${job.id}:${g.id}:${i}`,g.id,g.channel,chunks[i],new Date(Date.parse(job.created_at)+86400_000).toISOString());
+ const chunks=batchNoticeCards(payload.notices as Notice[]);
+ for(const g of await recipients(env,'notices_channel')) for(let i=0;i<chunks.length;i++) await deliveryIntent(env,`${job.id}:${g.id}:${i}`,g.id,g.channel,chunks[i].content,new Date(Date.parse(job.created_at)+86400_000).toISOString(),undefined,undefined,chunks[i].noticeCard);
  break;
  }
  case 'meal-discover': {
@@ -220,7 +220,7 @@ export async function executeJob(env:Env,job:Job) {
  if(!row) break;
  if(!allowedGuild(row.guild_id,env)){await env.DB.prepare("UPDATE deliveries SET state='failed',error='guild disabled' WHERE id=?").bind(payload.deliveryId).run();break;}
  // Keep file bytes transient; the durable intent carries only the meal date/slot.
- const content=payload.mealDate&&payload.mealSlot?await mealReportResponse(env,payload.mealDate,payload.mealSlot):payload.mealDate?await mealCommandResponse(env,payload.mealDate):row.content;
+ const content=payload.mealDate&&payload.mealSlot?await mealReportResponse(env,payload.mealDate,payload.mealSlot):payload.mealDate?await mealCommandResponse(env,payload.mealDate):payload.noticeCard?noticeCardMessage(payload.noticeCard):row.content;
  if(row.expires_at<=nowIso()||(payload.mealDate&&payload.mealDate!==todayKst())){
  await env.DB.prepare("UPDATE deliveries SET state='expired',updated_at=? WHERE id=? AND state='sending'").bind(nowIso(),payload.deliveryId).run();break;
  }
