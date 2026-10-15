@@ -10,7 +10,9 @@ export function mealCard(input:DiscordMessageInput):DiscordMessageInput{
   for(const line of lines){
    if(line.startsWith('원문: ')){sources.add(line);continue;}
    const match=line.match(/^(조식 한식|조식 양식·일품|조식 공통|석식):\s*(.+)$/);
-   details.push(match?`**${match[1]}**\n${match[2]}`:line);
+   if(!match){details.push(line);continue;}
+   const label=match[1].replace(/^조식 /,'');
+   details.push(label==='석식'?match[2]:`**${label}**\n${match[2]}`);
   }
   const children:DiscordCardComponent[]=[{type:10,content:[`### ${title}`,...details].join('\n')}];
   const file=files.find(file=>{const range=file.filename.match(/bellarmino-(\d{4}-\d{2}-\d{2})-(\d{4}-\d{2}-\d{2})\./);return date&&range&&date>=range[1]&&date<=range[2];});

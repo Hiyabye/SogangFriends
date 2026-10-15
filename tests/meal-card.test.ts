@@ -12,6 +12,13 @@ describe('meal components',()=>{
   expect(body.components!.at(-1)).toEqual({type:10,content:`원문: <https://school.example/menu>\n${footer}`});
   expect(JSON.stringify(body)).toContain('밥 / 국');expect(JSON.stringify(body)).toContain('미기재');
  });
+ it('omits the redundant dinner label and shortens breakfast labels without changing menus',()=>{
+  const body=message(mealCard(`오늘 저녁 (2026-10-15)\n석식: 제육버섯물고기, 쌀밥\n원문: <https://school.example/menu>\n\n내일 아침 (2026-10-16)\n조식 한식: 유부주머니어물탕\n조식 양식·일품: 유자파이\n조식 공통: 샐러드\n원문: <https://school.example/menu>\n${footer}`));
+  expect(body.components!.slice(0,2)).toEqual([
+   {type:17,accent_color:0x5865f2,components:[{type:10,content:'### 오늘 저녁 (2026-10-15)\n제육버섯물고기, 쌀밥'}]},
+   {type:17,accent_color:0x57f287,components:[{type:10,content:'### 내일 아침 (2026-10-16)\n**한식**\n유부주머니어물탕\n**양식·일품**\n유자파이\n**공통**\n샐러드'}]}
+  ]);
+ });
  it('exposes two-week attachments once each and keeps both sources outside',()=>{
   const files=['2026-10-12-2026-10-18','2026-10-19-2026-10-25'].map(range=>({filename:`bellarmino-${range}.png`,bytes:new Uint8Array([1]),mime:'image/png'}));
   const body=message(mealCard({content:`${part('오늘 저녁 (2026-10-18)')}\n\n${part('내일 아침 (2026-10-19)','https://school.example/next')}\n${footer}`,files}));
