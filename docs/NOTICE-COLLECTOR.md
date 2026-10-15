@@ -2,11 +2,16 @@
 
 ## Scope and current operation
 
-The project-owned Node/GitHub Actions collector uses the shared `src/sources.ts` catalog and parsers for eleven official boards:
+The project-owned Node/GitHub Actions collector uses the shared `src/sources.ts` catalog and parsers for eighteen official boards. The seven additions below require a separately approved Worker deployment before updated Actions upload them:
 
 | Source ID | Official page |
 |---|---|
 | `university` | <https://www.sogang.ac.kr/ko/academic-support/notices> |
+| `universityStudent` | <https://www.sogang.ac.kr/ko/campus/student-support/notice> (config34) |
+| `universityScholarship` | <https://www.sogang.ac.kr/ko/scholarship-notice> (config141) |
+| `universityGeneral` | <https://www.sogang.ac.kr/ko/story/notification-general> (config1) |
+| `universityEvent` | <https://www.sogang.ac.kr/ko/story/notification-event> (config142) |
+| `universityOnestop` | <https://www.sogang.ac.kr/ko/announcement> (config3) |
 | `academicNotice` | <https://computing.sogang.ac.kr/ko/community/academicNotice/list> |
 | `graduateNotice` | <https://computing.sogang.ac.kr/ko/community/graduateNotice/list> |
 | `externalInfo` | <https://computing.sogang.ac.kr/ko/community/externalInfo/list> |
@@ -16,9 +21,11 @@ The project-owned Node/GitHub Actions collector uses the shared `src/sources.ts`
 | `sweduNews` | <https://scc.sogang.ac.kr/front/cmsboardlist.do?siteId=sweducenter&bbsConfigFK=7251> |
 | `sweduPress` | <https://scc.sogang.ac.kr/front/cmsboardlist.do?siteId=sweducenter&bbsConfigFK=7252> |
 | `conveduNotice` | <https://convedu.sogang.ac.kr/front/cmsboardlist.do?siteId=convedu&bbsConfigFK=5551> |
+| `conveduNews` | <https://convedu.sogang.ac.kr/front/cmsboardlist.do?siteId=convedu&bbsConfigFK=5550> |
 | `bdataNotice` | <https://sc.sogang.ac.kr/bdata/4305.html> |
+| `bdataNews` | <https://sc.sogang.ac.kr/bdata/4306.html> |
 
-All eleven sources have initialized live baselines and stored production rows; five institution channels have confirmed manual Components V2 verification messages. A subsequent2026-10-14 live run verified one new `externalInfo` notice through ingestion, Queue processing, institution routing and Discord readback. This does not prove full history or every source/destination route. Current production includes the approved oversized-original change and migrations0009/0011; see [rollout evidence](VERIFICATION.md) and [archive limits](NOTICE-ARCHIVE.md#size-limits) for observed verification and remaining capacity limits.
+The original eleven sources have initialized live baselines and stored production rows; five institution channels have confirmed manual Components V2 verification messages. A subsequent2026-10-14 live run verified one new `externalInfo` notice through ingestion, Queue processing, institution routing and Discord readback. This does not prove full history or every source/destination route. Current production includes the approved oversized-original change and migrations0009/0011; see [rollout evidence](VERIFICATION.md) and [archive limits](NOTICE-ARCHIVE.md#size-limits) for observed verification and remaining capacity limits.
 
 ```text
 Official sources → Node → HMAC /internal/notices → D1 snapshot job → Queue → Discord
@@ -27,9 +34,13 @@ Official sources → Node → HMAC /internal/notices → D1 snapshot job → Que
 
 The collector needs no Discord, model or Cloudflare account API token and sends no Discord messages directly. First successful collection establishes a silent baseline; stable official IDs suppress duplicate/reordered/pinned posts. Later title/link updates do not become new alerts. A source failure does not stop healthy sources, but makes the run fail. A raw-capture failure likewise reports failure without suppressing an otherwise valid recent snapshot.
 
-The university list is official JSON; the other ten are HTML. Big-data wrapper `4305` embeds WebSTYLIST board `bbsid=5256`; neither is an article ID. Recent polling is bounded to **50 university rows** and **three pages per HTML board** (15 regular rows/page for SW boards, 10 for the others), not full-history traversal.
+The six university lists use official JSON; the other twelve are HTML. Big-data wrappers `4305` and `4306` embed WebSTYLIST boards `bbsid=5256` (notices) and `bbsid=5255` (photo-style News); wrapper IDs are not article IDs. Photo News validates page counts against its advertised total rather than table-row ordinals. Recent polling is bounded to **50 rows per university board** and **three pages per HTML board** (15 regular rows/page for SW boards, 10 for the others), not full-history traversal.
 
 Node uses one scoped, verified public intermediate to fix the official site's incomplete certificate chain. Never disable TLS or add unrelated trust material; see [certificate provenance](../certificates/README.md). There is no dependency on reference repositories' code, feeds or infrastructure.
+
+## Deferred scope: Convergence Education subsidiary programs
+
+The user explicitly deferred subsidiary-program sites; do not add them automatically to the `convedu` route. Candidates found through official program links include Big Data Science (`bds`,2067), Convergence Software (`csw`,1343), Artificial Intelligence (`aix`,2066), and Digital Humanities (`digihum`,5590). Their separate public notice lists were verified read-only. Other program menus also expose boards; a future expansion needs a fresh scope/ownership review, source verification and approval. Application/Q&A boards are not notice feeds by default. Only the parent site's center news5550 is included in this expansion.
 
 ## Schedule and read-only checks
 
@@ -47,7 +58,7 @@ No arguments also means dry-run. This performs **real read-only HTTPS requests**
 
 ## Upload configuration and approval
 
-Production is already configured; these are requirements for a new environment, not instructions to repeat activation. **Secret changes, Git push, deployment, workflow dispatch and uploads need approval.** Production Worker `0fde8db9-b124-4757-8819-e69ac99265c4` was deployed from main `4ad27e9` on2026-10-15, including the Office-local-image backfill fix; previously approved0009/0011 remain applied. Future changes still require their own approval.
+Production is already configured; these are requirements for a new environment, not instructions to repeat activation. **Secret changes, Git push, deployment, workflow dispatch and uploads need approval.** Production Worker `b270f4e4-415f-4025-9daa-cbe71a4eeb18` was deployed from main `de78988` on2026-10-15; previously approved0009/0011 remain applied. The seven additional boards are not part of that deployment. Deploy the expanded Worker before pushing collectors that submit new source IDs; no schema migration or command registration is needed. Each new source establishes its own silent baseline without resetting the original sources or historical cursors. Starting historical traversal for the new sources remains a separately approved action. Future changes still require their own approval.
 
 1. Configure the **same** dedicated `NOTICE_INGEST_SECRET` in Worker and Actions, privately. Keep the existing D1/Queue/baselines. Do not paste secrets into chat, Git, command arguments or logs.
 2. Deploy the approved Worker/schema with `NOTICE_COLLECTION_MODE=external`. Raw capture additionally requires its own matching schema and flag; follow [NOTICE-ARCHIVE.md](NOTICE-ARCHIVE.md).

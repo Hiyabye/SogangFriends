@@ -12,6 +12,13 @@ const university=(pageNum=1,total=1)=>({statusCode:200,data:{pageNum,total,list:
 const universityDetail=()=>({statusCode:200,data:{pkId:123,configPkId:2,title:'Synthetic notice',regDate:'20261010000000',content:'<p>Original <a href="/files/example.pdf">attachment</a><img src="/images/example.png"></p>',fileValue1:null}});
 afterEach(()=>vi.restoreAllMocks());
 describe('source-only notice archive',()=>{
+ it.each([['universityStudent',34],['universityScholarship',141],['universityGeneral',1],['universityEvent',142],['universityOnestop',3]])('validates %s raw content against board %s',(id,config)=>{
+  const n={...notice('university'),source:String(id),url:`https://www.sogang.ac.kr/ko/detail/123?bbsConfigFk=${config}`};
+  const input=universityDetail();input.data.configPkId=Number(config);
+  expect(parseNoticeRaw(input,n)).toMatchObject({notice:n,bodyHtml:input.data.content});
+  expect(()=>parseNoticeRaw(universityDetail(),n)).toThrow('university archive detail');
+  expect(()=>parseNoticeRaw(input,{...n,url:notice('university').url})).toThrow('detail URL');
+ });
  it('generalizes university page validation without changing the default page-one contract',()=>{
   expect(parseUniversity(university(),SOURCES[0])).toHaveLength(1);
   expect(()=>parseUniversity(university(2,51),SOURCES[0])).toThrow('Unexpected university');

@@ -3,6 +3,7 @@ import type { Notice, Source } from './types';
 import {mealWindow,type MealSource} from './meal-cache.ts';
 import {todayKst} from './time.ts';
 import {ADDITIONAL_NOTICE_SOURCES,legacyNoticePageUrl,parseLegacyNoticePage} from './legacy-notice-sources.ts';
+import {UNIVERSITY_NOTICE_SOURCES,universityBoardId} from './university-notice-sources.ts';
 
 type Node = DefaultTreeAdapterMap['node'];
 const children = (n: Node): Node[] => 'childNodes' in n ? n.childNodes : [];
@@ -20,8 +21,9 @@ function date(value: string): string { const d = value.replaceAll('.', '-'); if 
 function title(value: unknown): string { if (typeof value !== 'string' || !value.trim() || value.length > 1000) throw new Error('Invalid source title'); return value.trim(); }
 const positive = (v: unknown): boolean => /^(?:[1-9]\d*)$/.test(String(v));
 export const SOURCES: Source[] = [
- {id:'university',name:'서강대학교 학사공지',kind:'university',url:'https://www.sogang.ac.kr/api/api/v1/mainKo/BbsData/boardList?pageNum=1&pageSize=50&bbsConfigFk=2&category=&introPkId=&title=&content=&username='},
+ UNIVERSITY_NOTICE_SOURCES[0],
  ...[['academicNotice','소프트웨어융합대학 학사공지'],['graduateNotice','소프트웨어융합대학 대학원공지'],['externalInfo','소프트웨어융합대학 대외정보'],['news','소프트웨어융합대학 소식'],['career','소프트웨어융합대학 취업·인턴십']].map(([id,name]):Source => ({id,name,kind:'computing',url:`https://computing.sogang.ac.kr/ko/community/${id}/list?num=1`})),
+ ...UNIVERSITY_NOTICE_SOURCES.slice(1),
  ...ADDITIONAL_NOTICE_SOURCES
 ];
 const hosts = new Set(['www.sogang.ac.kr','computing.sogang.ac.kr','scc.sogang.ac.kr','convedu.sogang.ac.kr','sc.sogang.ac.kr']);
@@ -56,14 +58,15 @@ export async function sourceBytes(url: string, limit=2*1024*1024): Promise<{byte
 }
 async function html(url:string):Promise<string> { const r=await sourceBytes(url); if(!r.type.includes('text/html'))throw new Error('Expected source HTML'); return new TextDecoder().decode(r.bytes); }
 export function parseUniversity(value: unknown, source: Source=SOURCES[0], expectedPage=1): Notice[] {
+ const config=universityBoardId(source);
  if(!Number.isSafeInteger(expectedPage)||expectedPage<1)throw new Error('Invalid university page');
  const v=value as {statusCode?:unknown;data?:{list?:unknown;total?:unknown;pageNum?:unknown}};
  if(v?.statusCode!==200 || !v.data || !Array.isArray(v.data.list) || v.data.pageNum!==expectedPage || typeof v.data.total!=='number' || !Number.isSafeInteger(v.data.total) || v.data.total<0 || v.data.list.length>50 || (!v.data.list.length && v.data.total!==0)) throw new Error('Unexpected university response');
  const ids=new Set<string>(); const notices:Notice[]=[]; let regular=0;
- for(const raw of v.data.list){const r=raw as Record<string,unknown>; if(!positive(r.pkId)||r.configId!==2||typeof r.regDate!=='string'||!/^\d{14}$/.test(r.regDate)||!['Y','N'].includes(String(r.isTop)))throw new Error('Invalid university row');
+ for(const raw of v.data.list){const r=raw as Record<string,unknown>; if(!positive(r.pkId)||r.configId!==config||typeof r.regDate!=='string'||!/^\d{14}$/.test(r.regDate)||!['Y','N'].includes(String(r.isTop)))throw new Error('Invalid university row');
   const id=String(r.pkId);if(ids.has(id))throw new Error('Duplicate university identity');ids.add(id);if(r.isTop==='N')regular++;
   const published=date(`${r.regDate.slice(0,4)}-${r.regDate.slice(4,6)}-${r.regDate.slice(6,8)}`);
-  notices.push({id,source:source.id,title:title(r.title),published,url:`https://www.sogang.ac.kr/ko/detail/${id}?bbsConfigFk=2`});
+  notices.push({id,source:source.id,title:title(r.title),published,url:`https://www.sogang.ac.kr/ko/detail/${id}?bbsConfigFk=${config}`});
  }
  if(v.data.total>v.data.list.length && !regular)throw new Error('Pinned notices saturate collection window');
  return notices.sort((a,b)=>b.published.localeCompare(a.published)||Number(b.id)-Number(a.id));

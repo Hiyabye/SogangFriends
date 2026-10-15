@@ -19,7 +19,7 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci --omit=dev
-      - name: Collect and submit eleven official notice boards
+      - name: Collect and submit eighteen official notice boards
         run: |
           if [[ -z "$NOTICE_INGEST_URL" ]]; then
             echo "::error::Set the Actions variable NOTICE_INGEST_URL (or a secret with the same name)."

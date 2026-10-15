@@ -17,9 +17,12 @@ async function request(data:unknown,timestamp=String(Date.now()),key=secret) {
 function database(){const db=testDatabase();db.env.NOTICE_COLLECTION_MODE='external';db.env.NOTICE_INGEST_SECRET=secret;return db;}
 afterEach(()=>{vi.restoreAllMocks();vi.useRealTimers();});
 describe('authenticated notice ingestion',()=>{
- it('accepts all eleven canonical sources and rejects foreign or cross-board links and duplicate IDs',()=>{
-  expect(SOURCES).toHaveLength(11);
-  for(const s of SOURCES)expect(validateNoticeSnapshot({source:s.id,notices:[notice(s.id)]}).source).toBe(s.id);
+ it('accepts all eighteen canonical sources and rejects foreign or cross-board links and duplicate IDs',()=>{
+  expect(SOURCES).toHaveLength(18);
+  for(const s of SOURCES){
+   expect(validateNoticeSnapshot({source:s.id,notices:[notice(s.id)]}).source).toBe(s.id);
+   for(const other of SOURCES.filter(other=>other.id!==s.id))expect(()=>validateNoticeSnapshot({source:s.id,notices:[{...notice(s.id),url:notice(other.id).url}]})).toThrow();
+  }
   for(const n of [{...notice(),url:'https://attacker.test/1'},{...notice('news'),source:'career'},{...notice(),published:'2026-02-30'},{...notice(),id:'0'},{...notice(),title:''}])expect(()=>validateNoticeSnapshot({source:n.source,notices:[n]})).toThrow();
   expect(()=>validateNoticeSnapshot({source:'university',notices:[notice(),notice()]})).toThrow();
   expect(()=>validateNoticeSnapshot({source:'university',notices:[]})).toThrow();
@@ -70,9 +73,9 @@ describe('authenticated notice ingestion',()=>{
    expect(db.sqlite.prepare('SELECT COUNT(*) AS n FROM jobs').get()!.n).toBe(0);
   }finally{db.close();}
  });
- it('deduplicates replay, queues durable IDs only, and suppresses initial baseline alerts',async()=>{
+ it.each(SOURCES)('deduplicates replay and silently initializes $id before alerting on new IDs',async(source)=>{
   const db=database();try {
-   const r=await request({source:'university',notices:[notice()]});const replay=r.clone();
+   const r=await request({source:source.id,notices:[notice(source.id)]});const replay=r.clone();
    const first=await handleRequest(r,db.env);expect(first.status).toBe(202);const {id}=await first.json() as {id:string};
    expect((await handleRequest(replay,db.env)).status).toBe(202);
    expect(db.env.JOBS.send).toHaveBeenCalledWith({id});
@@ -80,9 +83,9 @@ describe('authenticated notice ingestion',()=>{
    const msg={body:{id},ack:vi.fn()};await consume(db.env,{messages:[msg]} as any);await consume(db.env,{messages:[msg]} as any);
    expect(db.sqlite.prepare('SELECT COUNT(*) AS n FROM notices').get()!.n).toBe(1);
    expect(db.sqlite.prepare("SELECT COUNT(*) AS n FROM jobs WHERE kind='notice-alert'").get()!.n).toBe(0);
-   expect(db.sqlite.prepare("SELECT initialized FROM sources WHERE id='university'").get()!.initialized).toBe(1);
+   expect(db.sqlite.prepare('SELECT initialized FROM sources WHERE id=?').get(source.id)!.initialized).toBe(1);
    expect(String(db.sqlite.prepare('SELECT payload FROM jobs WHERE id=?').get(id)!.payload)).not.toContain(secret);
-   const fresh=await handleRequest(await request({source:'university',notices:[notice('university','2'),notice()]}),db.env);
+   const fresh=await handleRequest(await request({source:source.id,notices:[notice(source.id,'2'),notice(source.id)]}),db.env);
    const freshId=(await fresh.json() as {id:string}).id;await consume(db.env,{messages:[{body:{id:freshId},ack:vi.fn()}]} as any);
    expect(db.sqlite.prepare("SELECT COUNT(*) AS n FROM jobs WHERE kind='notice-alert'").get()!.n).toBe(1);
   }finally{db.close();}

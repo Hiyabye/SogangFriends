@@ -10,6 +10,14 @@ async function mealDiscovery(){
 afterEach(()=>{vi.unstubAllGlobals();vi.restoreAllMocks();vi.useRealTimers();});
 describe('official source adapters with synthetic fixtures',()=>{
  it('uses official ID, sorts by publication not pinned position',()=>{const n=parseUniversity(JSON.parse(fixture('university.json')));expect(n.map(x=>x.id)).toEqual(['11','10']);expect(n[0].url).toBe('https://www.sogang.ac.kr/ko/detail/11?bbsConfigFk=2');});
+ it.each([['universityStudent',34],['universityScholarship',141],['universityGeneral',1],['universityEvent',142],['universityOnestop',3]])('binds %s list rows and canonical URLs to board %s',(id,config)=>{
+  const source=SOURCES.find(s=>s.id===id)!;const value=JSON.parse(fixture('university.json'));
+  for(const row of value.data.list)row.configId=config;
+  const notices=parseUniversity(value,source);expect(notices).toHaveLength(2);
+  expect(notices[0]).toMatchObject({source:id,url:`https://www.sogang.ac.kr/ko/detail/11?bbsConfigFk=${config}`});
+  expect(()=>parseUniversity(value,SOURCES[0])).toThrow('university row');
+  expect(()=>parseUniversity(value,{...source,url:source.url.replace(`bbsConfigFk=${config}`, 'bbsConfigFk=2')})).toThrow('Unknown university');
+ });
  it('rejects invalid dates, duplicate IDs, config mismatch and malformed empty data',()=>{const f=JSON.parse(fixture('university.json'));f.data.list[0].regDate='20260230090000';expect(()=>parseUniversity(f)).toThrow();const d=JSON.parse(fixture('university.json'));d.data.list[1].pkId=10;expect(()=>parseUniversity(d)).toThrow();expect(()=>parseUniversity({statusCode:200,data:{list:[],total:4,pageNum:1}})).toThrow();expect(()=>parseUniversity({statusCode:200,data:{list:[{pkId:1,configId:3,regDate:'20261001000000',isTop:'N',title:'Wrong'}],total:1,pageNum:1}})).toThrow();});
  it.each([NaN,Infinity,-Infinity,-1,1.5,Number.MAX_SAFE_INTEGER+1])('rejects invalid university total %s',total=>{
   const value=JSON.parse(fixture('university.json'));value.data.total=total;

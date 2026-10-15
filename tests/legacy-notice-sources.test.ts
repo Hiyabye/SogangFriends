@@ -8,14 +8,15 @@ import {testDatabase} from './helpers/db';
 import type {Source} from '../src/types';
 
 // Original synthetic fixtures model the observed CMS and WebSTYLIST structures.
-const inputs=(s:Source,id?:string)=>{const u=new URL(s.url);return (s.kind==='cms'?[['bbsConfigFK',u.searchParams.get('bbsConfigFK')],['siteId',u.searchParams.get('siteId')]]:[['bbsid','5256'],['wslID','bdata']]).concat(id?[['pkid',id]]:[]).map(([key,value])=>`<input name="${key}" value="${value}">`).join('')+'<input name="searchValue" value="">';};
+const inputs=(s:Source,id?:string)=>{const u=new URL(s.url);return (s.kind==='cms'?[['bbsConfigFK',u.searchParams.get('bbsConfigFK')],['siteId',u.searchParams.get('siteId')]]:[['bbsid',s.id==='bdataNews'?'5255':'5256'],['wslID','bdata']]).concat(id?[['pkid',id]]:[]).map(([key,value])=>`<input name="${key}" value="${value}">`).join('')+'<input name="searchValue" value="">';};
 function page(s:Source,p=1,last=1,count=2,pin=true):string{
- const cms=s.kind==='cms';const row=(id:number,ordinal:number,pinned=false)=>{const u=new URL(noticeDetailUrl(s,String(id)));u.searchParams.set('currentPage',String(p));const a=`<a ${cms?'class="title"':''} href="${u.href}">${pinned?'<strong>[공지] </strong>':''}Notice ${id}</a>`;
+ const cms=s.kind==='cms',photo=s.id==='bdataNews';const row=(id:number,ordinal:number,pinned=false)=>{const u=new URL(noticeDetailUrl(s,String(id)));u.searchParams.set('currentPage',String(p));const a=`<a ${cms?'class="title"':''} href="${u.href}">${pinned?'<strong>[공지] </strong>':''}Notice ${id}</a>`;
+  if(photo)return `<tr><td><div class="item"><a class="subject" href="${u.href}">Notice ${id}</a><div class="date">2026.10.09 / Fixture</div></div></td></tr>`;
   return cms?`<li><div style="display: flex;">${pinned?'':`<div>${ordinal}</div>`}<div>${a}<div class="info"><span>Fixture</span><span>2026.10.09</span><span>5</span></div></div></div></li>`:`<tr><td>${ordinal}</td><td><div class="subject">${a}</div></td><td>Fixture</td><td></td><td>2026.10.09</td><td>5</td></tr>`;
  };
  const rows=(cms&&pin?row(999,0,true):'')+Array.from({length:count},(_,i)=>row(1000-p*100-i,p===last?count-i:200-i)).join('');
  const onclick=`onclick="sendPage('pageForm','${last}');return false;"`;
- return inputs(s)+(cms?`<div class="list_box"><ul>${rows}</ul></div><div class="board_paging"><ul><li class="on"><a><span>${p}</span></a></li></ul><div class="total_cnt">/ ${last}</div><li class="btn_last"><a ${onclick}>last</a></li></div>`:`<div class="bbs-list"><table><tbody>${rows}</tbody></table></div><div class="pagination"><div class="pagination"><div class="align"><span class="current">${p}</span><a class="last" ${onclick}>last</a></div></div></div>`);
+ return inputs(s)+(photo?`<div class="summary local"><em>${(last-1)*10+(p===last?count:2)}</em></div>`:'')+(cms?`<div class="list_box"><ul>${rows}</ul></div><div class="board_paging"><ul><li class="on"><a><span>${p}</span></a></li></ul><div class="total_cnt">/ ${last}</div><li class="btn_last"><a ${onclick}>last</a></li></div>`:`<div class="bbs-list ${photo?'photo-list':''}"><table><tbody>${rows}</tbody></table></div><div class="pagination"><div class="pagination"><div class="align"><span class="current">${p}</span><a class="last" ${onclick}>last</a></div></div></div>`);
 }
 function detail(s:Source,id='900'):string{
  const body='<p data-original="yes">Body &amp; content</p><img src="/images/example.png"><a href="/file.pdf">file</a>';
@@ -37,7 +38,7 @@ describe('additional official notice boards',()=>{
  });
  it.each(ADDITIONAL_NOTICE_SOURCES)('validates $id history pagination, board identity and malformed rows',s=>{
   const html=page(s);expect(()=>parseNoticePage(html,s,2)).toThrow('page number');
-  expect(()=>parseNoticePage(html.replace(s.kind==='cms'?'value="'+new URL(s.url).searchParams.get('bbsConfigFK')+'"':'value="5256"','value="9999"'),s,1)).toThrow('board/post');
+  expect(()=>parseNoticePage(html.replace(s.kind==='cms'?'value="'+new URL(s.url).searchParams.get('bbsConfigFK')+'"':`value="${s.id==='bdataNews'?'5255':'5256'}"`,'value="9999"'),s,1)).toThrow('board/post');
   expect(()=>parseNoticePage(html.replace('name="searchValue" value=""','name="searchValue" value="filtered"'),s,1)).toThrow('Filtered');
   expect(()=>parseNoticePage(html.replace('2026.10.09','2026.02.30'),s,1)).toThrow('date');
   expect(()=>parseNoticePage(html.replace('pkid=899','pkid=900'),s,1)).toThrow('Duplicate');
@@ -54,6 +55,18 @@ describe('additional official notice boards',()=>{
   expect(()=>parseNoticeRaw(html.replace('Notice 900','Changed title'),n)).toThrow('title');
   expect(()=>parseNoticeRaw(html.replace('2026.10.09','2026.10.08'),n)).toThrow('date');
   expect(()=>parseNoticeRaw(html,{...n,url:n.url+'&extra=1'})).toThrow('URL');
+ });
+ it('proves photo-board page coverage using its total and rejects another board or layout',()=>{
+  const s=ADDITIONAL_NOTICE_SOURCES.find(s=>s.id==='bdataNews')!;
+  const html=page(s,1,2,10).replace('</tbody>','<tr><td><div class="item"></div></td></tr></tbody>');
+  expect(parseLegacyNoticePage(html,s).regularCount).toBe(10);
+  expect(legacyNoticePageUrl(s,1)).toContain('bbsid=5255');
+  expect(noticeDetailUrl(s,'900')).toBe('https://sc.sogang.ac.kr/bbs/bbsview.do?bbsid=5255&wslID=bdata&pkid=900');
+  expect(()=>parseLegacyNoticePage(html.replace('<em>12</em>','<em>22</em>'),s)).toThrow('coverage');
+  expect(()=>parseLegacyNoticePage(page(s,2,2,2).replace('<em>12</em>','<em>13</em>'),s,2)).toThrow('coverage');
+  expect(()=>parseLegacyNoticePage(html.replace('photo-list','table-list'),s)).toThrow('structure');
+  expect(()=>parseLegacyNoticePage(html.replaceAll('bbsid=5255','bbsid=5256'),s)).toThrow('link');
+  expect(()=>parseLegacyNoticePage(html.replace('2026.10.09 / Fixture','2026.10.09'),s)).toThrow('metadata');
  });
  it('retains oversized inline-image original HTML only through the bounded archive detail transport',async()=>{
   vi.useFakeTimers();
@@ -75,11 +88,11 @@ describe('additional official notice boards',()=>{
  });
  it('uses the shared bounded, paced transport for recent collection and raw/backfill without uploads',async()=>{
   vi.useFakeTimers();vi.setSystemTime(new Date('2026-10-13T00:00:00Z'));vi.resetModules();const sources=await import('../src/sources');const archive=await import('../src/notice-archive-sources');
-  const starts:number[]=[];const fetcher=vi.fn(async(value:unknown,options?:RequestInit)=>{expect(options?.redirect).toBe('manual');starts.push(Date.now());const u=new URL(String(value));const s=ADDITIONAL_NOTICE_SOURCES.find(s=>new URL(legacyNoticePageUrl(s,1)).origin===u.origin&&(s.kind==='legacy'||new URL(s.url).searchParams.get('bbsConfigFK')===u.searchParams.get('bbsConfigFK')))!;const p=Number(u.searchParams.get('currentPage')??1);return new Response(u.pathname.endsWith('view.do')?detail(s):page(s,p,2,p===1?(s.id.startsWith('swedu')?15:10):2),{headers:{'content-type':'text/html;charset=utf-8'}});});vi.stubGlobal('fetch',fetcher);
+  const starts:number[]=[];const fetcher=vi.fn(async(value:unknown,options?:RequestInit)=>{expect(options?.redirect).toBe('manual');starts.push(Date.now());const u=new URL(String(value));const s=ADDITIONAL_NOTICE_SOURCES.find(s=>new URL(legacyNoticePageUrl(s,1)).origin===u.origin&&(s.kind==='legacy'?new URL(legacyNoticePageUrl(s,1)).searchParams.get('bbsid')===u.searchParams.get('bbsid'):new URL(s.url).searchParams.get('bbsConfigFK')===u.searchParams.get('bbsConfigFK')))!;const p=Number(u.searchParams.get('currentPage')??1);return new Response(u.pathname.endsWith('view.do')?detail(s):page(s,p,2,p===1?(s.id.startsWith('swedu')?15:10):2),{headers:{'content-type':'text/html;charset=utf-8'}});});vi.stubGlobal('fetch',fetcher);
   for(const s of ADDITIONAL_NOTICE_SOURCES){const pending=sources.collectNotices(s);await vi.runAllTimersAsync();const result=await pending;expect(result.filter(n=>n.id==='999')).toHaveLength(s.kind==='cms'?1:0);expect(result.find(n=>n.id==='800')).toBeTruthy();
    const p=archive.collectNoticePage(s,2);await vi.runAllTimersAsync();expect((await p).done).toBe(true);
    const n=result.find(n=>n.id==='900')!;const raw=archive.collectNoticeRaw(n);await vi.runAllTimersAsync();expect((await raw).bodyHtml).toContain('data-original="yes"');
   }
-  expect(fetcher).toHaveBeenCalledTimes(20);expect(starts.every((start,i)=>!i||start-starts[i-1]>=1000)).toBe(true);
+  expect(fetcher).toHaveBeenCalledTimes(ADDITIONAL_NOTICE_SOURCES.length*4);expect(starts.every((start,i)=>!i||start-starts[i-1]>=1000)).toBe(true);
  });
 });

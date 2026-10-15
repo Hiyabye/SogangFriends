@@ -20,7 +20,7 @@ Use **Node >=24**, npm and the committed `package-lock.json`. TypeScript runs in
 | HTTP signature verification, defer, commands | `src/worker.ts`, `src/discord.ts` |
 | Cron planning and Queue consumption | `src/jobs.ts` |
 | D1 claims, outbox, baselines and recovery | `src/storage.ts`, `migrations/` |
-| Eleven official notice sources | `src/sources.ts`, `src/legacy-notice-sources.ts` |
+| Eighteen official notice sources | `src/sources.ts`, `src/university-notice-sources.ts`, `src/legacy-notice-sources.ts` |
 | Five institution routes | `src/notice-channels.ts` |
 | Snapshot HMAC ingress | `src/notice-ingest.ts` |
 | Raw archive, pagination and D1 limits | `src/notice-archive*.ts`, `scripts/notice-archive-client.mjs` |
@@ -72,21 +72,22 @@ git diff --check
 
 ## Notices
 
-The eleven boards map to five groups:
+The eighteen boards map to five groups (the seven added boards still need a separately approved deployment; production boundary below remains unchanged):
 
 | Setup group | Source IDs |
 |---|---|
-| `university` | `university` (school headquarters academic notices only) |
+| `university` | `university`, `universityStudent`, `universityScholarship`, `universityGeneral`, `universityEvent`, `universityOnestop` |
 | `computing` | `academicNotice`, `graduateNotice`, `externalInfo`, `news`, `career` |
 | `swedu` | `sweduNotice`, `sweduNews`, `sweduPress` |
-| `convedu` | `conveduNotice` |
-| `bdata` | `bdataNotice` |
+| `convedu` | `conveduNotice`, `conveduNews` |
+| `bdata` | `bdataNotice`, `bdataNews` |
 
 - Dedicated institution channel overrides `notices_channel`; never also send to fallback. With neither configured, skip that group. Group by destination **before** card batching, preserving existing delivery IDs/committed plans.
 - Current production uses all five institution channels with **NULL fallback**; the former combined channel was deleted. Do not restore it from historical verification records.
 - `legacy-notice-sources.ts` is **active** CMS/WebSTYLIST support, not dead bot code. The big-data wrapper ID is not its article ID. Keep canonical detail URL checks in ingestion.
 - `NOTICE_COLLECTION_MODE=external` must skip both new and previously queued direct collection jobs. Node supplements TLS with exactly the single pinned public intermediate; never disable verification or add unrelated trust material. Follow [certificate checks](certificates/README.md).
-- Recent scope: 50 university entries; at most three HTML pages (SW board pages have 15 regular posts, other HTML boards 10). Source requests are spaced by one second, redirects rejected, timeout 20 seconds. Do not silently turn a parser/transport failure into an empty board or EOF.
+- University board configs are source-bound:2/34/141/1/142/3; preserve existing `university` identity. Big-data News is photo board5255, not notice board5256. Convergence subsidiary-program notices are explicitly deferred; candidates and scope are recorded in [collector contract](docs/NOTICE-COLLECTOR.md#deferred-scope-convergence-education-subsidiary-programs).
+- Recent scope: 50 entries per university board; at most three HTML pages (SW board pages have 15 regular posts, other HTML boards 10). Source requests are spaced by one second, redirects rejected, timeout 20 seconds. Do not silently turn a parser/transport failure into an empty board or EOF.
 - Recent snapshots expire after 30 minutes; notice alerts/intents after 24 hours. Changes to titles/links are not new IDs. Do not reset baselines or replay history to test routing.
 - [Collector contract](docs/NOTICE-COLLECTOR.md): HMAC freshness, bounded exact-byte retries and Actions setup.
 - [Archive contract](docs/NOTICE-ARCHIVE.md): first retained raw capture, cumulative metadata, capacity guard and slow resumable backfill. Historical imports create no alerts and do not change live baselines/health. Preserve start-day protection so backfill cannot suppress fresh alerts.

@@ -40,7 +40,7 @@ describe('private raw notice archive',()=>{
    expect(db.objects.size).toBe(0);expect(db.sqlite.prepare('SELECT COUNT(*) AS n FROM notice_archive_progress').get()!.n).toBe(0);
   }finally{db.close();}
  });
- it('starts eleven cursors once without resetting completed progress',async()=>{
+ it('starts eighteen cursors once without resetting completed progress',async()=>{
   const db=database();try{
    expect(await (await db.send({action:'status'})).json()).toEqual({sources:[]});
    expect(await (await db.send({action:'start'})).json()).toEqual({started:true});

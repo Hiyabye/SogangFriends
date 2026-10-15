@@ -1,5 +1,6 @@
 import {parse,type DefaultTreeAdapterMap} from 'parse5';
 import {SOURCES,sourceBytes,parseUniversity,parseComputing} from './sources.ts';
+import {universityBoardId} from './university-notice-sources.ts';
 import type {Notice,Source} from './types';
 import {validDate} from './time.ts';
 import {ARCHIVE_MAX_BODY_BYTES} from './notice-archive-limits.ts';
@@ -85,7 +86,7 @@ export function parseNoticeRaw(input:string|unknown,notice:Notice):NoticeRaw {
  if(source.kind==='cms'||source.kind==='legacy'){if(typeof input!=='string')throw new Error('Expected legacy archive HTML');return {notice,...parseLegacyNoticeRaw(input,source,notice)};}
  if(source.kind==='university'){
   const response=input as {statusCode?:unknown;data?:Record<string,unknown>};const d=response?.data;
-  if(response?.statusCode!==200||!d||String(d.pkId)!==notice.id||d.configPkId!==2||typeof d.content!=='string'||typeof d.title!=='string'||d.title.trim()!==notice.title||typeof d.regDate!=='string'||!/^(?:\d{14}|\d{4}-\d{2}-\d{2}.*)$/.test(d.regDate))throw new Error('Wrong university archive detail');
+  if(response?.statusCode!==200||!d||String(d.pkId)!==notice.id||d.configPkId!==universityBoardId(source)||typeof d.content!=='string'||typeof d.title!=='string'||d.title.trim()!==notice.title||typeof d.regDate!=='string'||!/^(?:\d{14}|\d{4}-\d{2}-\d{2}.*)$/.test(d.regDate))throw new Error('Wrong university archive detail');
   const published=/^\d{14}$/.test(d.regDate)?`${d.regDate.slice(0,4)}-${d.regDate.slice(4,6)}-${d.regDate.slice(6,8)}`:d.regDate.slice(0,10);if(published!==notice.published)throw new Error('Changed university archive date');
   const refs=references(d.content,notice.url);for(let i=1;i<=5;i++){const f=d[`fileValue${i}`];if(f===null||f===undefined||f==='')continue;if(typeof f!=='string'||!/^https?:\/\/|^\//.test(f))throw new Error('Unresolved university attachment metadata');refs.attachments.push(link(f,notice.url));}
   return {notice,bodyHtml:d.content,attachments:[...new Set(refs.attachments)],imageUrls:refs.imageUrls};

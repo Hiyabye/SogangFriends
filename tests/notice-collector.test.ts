@@ -104,8 +104,8 @@ describe('standalone authenticated notice collector',()=>{
   expect(output).toContain('university: 1 notices accepted');
   expect(output).not.toContain('private source body');expect(output).not.toContain(secret);
  });
- it('covers exactly the eleven approved source IDs and rejects insecure CLI launch settings',async()=>{
-  expect(SOURCES.map(s=>s.id)).toEqual(['university','academicNotice','graduateNotice','externalInfo','news','career','sweduNotice','sweduNews','sweduPress','conveduNotice','bdataNotice']);
+ it('covers exactly the eighteen approved source IDs and rejects insecure CLI launch settings',async()=>{
+  expect(SOURCES.map(s=>s.id)).toEqual(['university','academicNotice','graduateNotice','externalInfo','news','career','universityStudent','universityScholarship','universityGeneral','universityEvent','universityOnestop','sweduNotice','sweduNews','sweduPress','conveduNotice','conveduNews','bdataNotice','bdataNews']);
   await expect(main(['--unknown'],{})).rejects.toThrow('Usage');
   await expect(main(['--send','--dry-run'],{})).rejects.toThrow('Usage');
   await expect(main([], {NODE_TLS_REJECT_UNAUTHORIZED:'0'})).rejects.toThrow('TLS verification');

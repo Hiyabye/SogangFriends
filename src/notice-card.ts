@@ -3,7 +3,7 @@ import {SOURCES} from './sources';
 import {display,truncate,noticeBatches,type DiscordCardComponent,type DiscordMessageInput} from './discord';
 
 export interface NoticeCard {version:1;components:DiscordCardComponent[]}
-const colors:Record<string,number>={university:0xed4245,academicNotice:0x5865f2,graduateNotice:0x9b59b6,externalInfo:0x3498db,news:0x57f287,career:0xfee75c,sweduNotice:0xe67e22,sweduNews:0x1abc9c,sweduPress:0xf1c40f,conveduNotice:0x2ecc71,bdataNotice:0x11806a};
+const colors:Record<string,number>={university:0xed4245,universityStudent:0xed4245,universityScholarship:0xed4245,universityGeneral:0xed4245,universityEvent:0xed4245,universityOnestop:0xed4245,academicNotice:0x5865f2,graduateNotice:0x9b59b6,externalInfo:0x3498db,news:0x57f287,career:0xfee75c,sweduNotice:0xe67e22,sweduNews:0x1abc9c,sweduPress:0xf1c40f,conveduNotice:0x2ecc71,conveduNews:0x2ecc71,bdataNotice:0x11806a,bdataNews:0x11806a};
 
 /** Retain legacy batch membership/IDs; only the displayed layout changes. */
 export function batchNoticeCards(notices:Notice[]):{content:string;noticeCard:NoticeCard}[]{
