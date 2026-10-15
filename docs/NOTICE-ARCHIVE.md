@@ -2,7 +2,7 @@
 
 ## Current state and rollout boundary
 
-The archive uses the **existing D1 database only**. Node/GitHub Actions fetch official pages with verified TLS, then submit authenticated captures to the Worker. The original eleven notice sources are initialized in production; the local catalog adds seven more boards pending deployment, with independent baselines/cursors and no schema changes. Source definitions and official URLs are in [NOTICE-COLLECTOR.md](NOTICE-COLLECTOR.md).
+The archive uses the **existing D1 database only**. Node/GitHub Actions fetch official pages with verified TLS, then submit authenticated captures to the Worker. The original eleven notice sources are initialized in production; the expanded18-source catalog was deployed/pushed with approval on2026-10-16 KST. The seven additions use independent baselines/cursors and no schema changes; their live initialization and historical traversal are not yet verified. Source definitions and official URLs are in [NOTICE-COLLECTOR.md](NOTICE-COLLECTOR.md).
 
 `NOTICE_ARCHIVE_ENABLED=true` is checked into `wrangler.toml`; production archive activation and the initial six-source historical start were approved in 2026-10. This does **not** establish complete history or authorize starting missing historical cursors for the five later sources. See [VERIFICATION.md](VERIFICATION.md) for observed outcomes rather than inferring them from flags.
 

@@ -2,7 +2,7 @@
 
 ## Scope and current operation
 
-The project-owned Node/GitHub Actions collector uses the shared `src/sources.ts` catalog and parsers for eighteen official boards. The seven additions below require a separately approved Worker deployment before updated Actions upload them:
+The project-owned Node/GitHub Actions collector uses the shared `src/sources.ts` catalog and parsers for eighteen official boards. The seven additions were deployed to the Worker before the updated collector was pushed, with approval on2026-10-16 KST; their initial live baselines remain unverified:
 
 | Source ID | Official page |
 |---|---|
@@ -58,7 +58,7 @@ No arguments also means dry-run. This performs **real read-only HTTPS requests**
 
 ## Upload configuration and approval
 
-Production is already configured; these are requirements for a new environment, not instructions to repeat activation. **Secret changes, Git push, deployment, workflow dispatch and uploads need approval.** Production Worker `b270f4e4-415f-4025-9daa-cbe71a4eeb18` was deployed from main `de78988` on2026-10-15; previously approved0009/0011 remain applied. The seven additional boards are not part of that deployment. Deploy the expanded Worker before pushing collectors that submit new source IDs; no schema migration or command registration is needed. Each new source establishes its own silent baseline without resetting the original sources or historical cursors. Starting historical traversal for the new sources remains a separately approved action. Future changes still require their own approval.
+Production is already configured; these are requirements for a new environment, not instructions to repeat activation. **Secret changes, Git push, deployment, workflow dispatch and uploads need approval.** Production Worker `46e9f550-86d7-4692-b14c-b6fc1771e9c3` was deployed from main `a87212a` on2026-10-16 KST, then the expanded collector was pushed, in the user-approved order. No migrations were pending or applied; previously approved0009/0011 remain applied. All18 boards are supported by deployed code, but the seven new baselines were absent at rollout readback and await collection. No collector workflow was manually dispatched. Future source expansions likewise require Worker deployment before collector push; no schema migration or command registration was needed for this expansion. Each new source establishes its own silent baseline without resetting the original sources or historical cursors. Starting historical traversal for the new sources remains a separately approved action. Future changes still require their own approval.
 
 1. Configure the **same** dedicated `NOTICE_INGEST_SECRET` in Worker and Actions, privately. Keep the existing D1/Queue/baselines. Do not paste secrets into chat, Git, command arguments or logs.
 2. Deploy the approved Worker/schema with `NOTICE_COLLECTION_MODE=external`. Raw capture additionally requires its own matching schema and flag; follow [NOTICE-ARCHIVE.md](NOTICE-ARCHIVE.md).
