@@ -5,6 +5,7 @@ import {SOURCES,SourceHttpError} from '../src/sources';
 import {createArchiveClient,captureRawNotices} from '../scripts/notice-archive-client.mjs';
 import {runBackfill} from '../scripts/backfill-notices.mjs';
 import {testDatabase} from './helpers/db';
+import {ARCHIVE_MAX_REFERENCES} from '../src/notice-archive-limits';
 const secret='fixture-archive-secret-'.repeat(3);
 const notice=(source='university',id='1')=>({source,id,title:'공식 본문 공지',published:'2026-10-09',url:source==='university'?`https://www.sogang.ac.kr/ko/detail/${id}?bbsConfigFk=2`:`https://computing.sogang.ac.kr/ko/community/${source}/detail/${id}`});
 const raw=(source='university',id='1')=>({notice:notice(source,id),bodyHtml:'<p>원문 &amp; <script>untrusted()</script></p>',attachments:['https://www.sogang.ac.kr/file.pdf'],imageUrls:['https://www.sogang.ac.kr/image.png']});
@@ -234,9 +235,25 @@ describe('private raw notice archive',()=>{
    expect(db.sqlite.prepare('SELECT title FROM notices').get()!.title).toBe('newer title');
   }finally{db.close();}
  });
+ it.each([102,ARCHIVE_MAX_REFERENCES])('retains all %s newsletter image and attachment references',async(count)=>{
+  const db=database();try{
+   const links=Array.from({length:count},(_,i)=>`https://example.test/newsletter/${i}.png`);
+   const input={...raw(),attachments:links,imageUrls:links};
+   expect((await db.send({action:'record',raw:input})).status).toBe(200);
+   expect(JSON.parse(db.objects.get('raw/university/1.json')!)).toMatchObject({attachments:links,imageUrls:links});
+  }finally{db.close();}
+ });
+ it.each(['attachments','imageUrls'])('rejects excessive %s counts and individual URLs without storing a partial capture',async(field)=>{
+  const db=database();try{
+   for(const links of [Array(ARCHIVE_MAX_REFERENCES+1).fill('https://example.test/a'),['https://example.test/'+ 'a'.repeat(2000)]]){
+    expect((await db.send({action:'record',raw:{...raw(),[field]:links}})).status).toBe(400);
+    expect(db.objects.size).toBe(0);
+   }
+  }finally{db.close();}
+ });
  it('rejects unsafe references, wrong IDs/URLs, malformed JSON and bounded oversized bodies',async()=>{
   const db=database();try{
-   for(const bad of [{...raw(),attachments:['javascript:alert(1)']},{...raw(),imageUrls:['https://user:pass@example.test/a']},{...raw(),notice:{...notice(),url:'https://evil.test/1'}},{...raw(),bodyHtml:'x'.repeat(8*1024*1024+1)},{...raw(),attachments:Array(101).fill('https://example.test/a')}])expect((await db.send({action:'record',raw:bad})).status).toBe(400);
+   for(const bad of [{...raw(),attachments:['javascript:alert(1)']},{...raw(),imageUrls:['https://user:pass@example.test/a']},{...raw(),notice:{...notice(),url:'https://evil.test/1'}},{...raw(),bodyHtml:'x'.repeat(8*1024*1024+1)},{...raw(),attachments:Array(ARCHIVE_MAX_REFERENCES+1).fill('https://example.test/a')}])expect((await db.send({action:'record',raw:bad})).status).toBe(400);
    for(const bad of [{action:'missing',source:'university',ids:['1','1']},{action:'missing',source:'unknown',ids:['1']},{action:'missing',source:'news',ids:Array.from({length:51},(_,i)=>String(i+1))},{action:'commit',source:'news',page:1,ids:[],done:false},{action:'commit',source:'news',page:0,ids:['1'],done:true}])expect((await db.send(bad)).status).toBe(400);
    expect((await db.send('not JSON')).status).toBe(400);
    expect((await db.send('x'.repeat(16*1024*1024+1))).status).toBe(413);

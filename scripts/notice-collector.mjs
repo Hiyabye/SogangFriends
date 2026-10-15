@@ -67,6 +67,8 @@ export function collectionFailure(error) {
   if(error.message==='Source too large')return 'source-size-limit';
   if(error.name==='AbortError'||error.name==='TimeoutError')return 'source-timeout';
   if(error.message==='Raw capture incomplete')return 'raw-incomplete';
+  const archiveHttp=error.message.match(/^Archive (?:rejected request|unavailable after bounded retries) \(HTTP ([1-5]\d{2})\)$/);
+  if(archiveHttp)return `archive-http-${archiveHttp[1]}`;
  }
  return 'unclassified';
 }

@@ -3,7 +3,7 @@ import {SOURCES} from './sources';
 import {validateNoticeSnapshot,verifyCollectorRequest} from './notice-ingest';
 import {nowIso} from './storage';
 import {todayKst} from './time';
-import {ARCHIVE_MAX_REQUEST_BYTES,ARCHIVE_MAX_BODY_BYTES,ARCHIVE_INLINE_BODY_BYTES,archiveBodyChunks} from './notice-archive-limits';
+import {ARCHIVE_MAX_REQUEST_BYTES,ARCHIVE_MAX_BODY_BYTES,ARCHIVE_MAX_REFERENCES,ARCHIVE_INLINE_BODY_BYTES,archiveBodyChunks} from './notice-archive-limits';
 interface RawNotice {notice:Notice;bodyHtml:string;attachments:string[];imageUrls:string[]}
 interface Progress {source:string;page:number;state:'active'|'done';updated_at:string;started_at:string}
 type ArchiveAction={action:'status'|'start'}|{action:'missing';source:string;ids:string[];includeUnavailable:boolean}|{action:'record';raw:RawNotice}|{action:'unavailable';notice:Notice;status:404|410}|{action:'commit';source:string;page:number;ids:string[];done:boolean};
@@ -13,7 +13,7 @@ function ids(value:unknown):string[] {
  if(!Array.isArray(value)||value.length>50||value.some(id=>typeof id!=='string'||!/^[1-9]\d{0,19}$/.test(id))||new Set(value).size!==value.length)throw new Error('Invalid archive IDs');return value;
 }
 function references(value:unknown):string[] {
- if(!Array.isArray(value)||value.length>100)throw new Error('Invalid archive references');
+ if(!Array.isArray(value)||value.length>ARCHIVE_MAX_REFERENCES)throw new Error('Invalid archive references');
  return value.map(link=>{if(typeof link!=='string'||link.length>2000)throw new Error('Invalid archive reference');const url=new URL(link);if(!['http:','https:'].includes(url.protocol)||url.username||url.password)throw new Error('Invalid archive reference');return link;});
 }
 function validateRaw(value:unknown):RawNotice {

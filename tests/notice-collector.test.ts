@@ -14,6 +14,11 @@ describe('standalone authenticated notice collector',()=>{
   expect(collectionFailure(new DOMException('private timeout details','AbortError'))).toBe('source-timeout');
   expect(collectionFailure(new Error(`private body ${secret}`))).toBe('unclassified');
  });
+ it('classifies only exact bounded archive HTTP errors without exposing bodies or secrets',()=>{
+  expect(collectionFailure(new Error('Archive rejected request (HTTP 400)'))).toBe('archive-http-400');
+  expect(collectionFailure(new Error('Archive unavailable after bounded retries (HTTP 503)'))).toBe('archive-http-503');
+  for(const message of [`Archive rejected request (HTTP 400) ${secret}`,`${secret} Archive rejected request (HTTP 400)`,'Archive rejected request (HTTP 999)','Archive rejected request (HTTP private body)'])expect(collectionFailure(new Error(message))).toBe('unclassified');
+ });
  it('pins the official CA fingerprint, verifies root signature and enforces validity',()=>{
   const cert=verifyCertificate();expect(cert.fingerprint256.replaceAll(':','')).toBe(CERTIFICATE_FINGERPRINT);expect(cert.ca).toBe(true);
   const pem=readFileSync(CERTIFICATE_URL);
