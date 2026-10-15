@@ -132,7 +132,7 @@ The eleven boards map to five groups:
 
 ## Current deployment boundary — do not bypass
 
-- Verified production Worker: **`0fde8db9-b124-4757-8819-e69ac99265c4`**, deployed from main **`4ad27e9`** on2026-10-15 with explicit approval. It includes the notice-local-image backfill fix, oversized originals and Moderate-review fixes. Actions at the same commit also support the reviewed narrow-label inline meal PNG.
+- Verified production Worker: **`b270f4e4-415f-4025-9daa-cbe71a4eeb18`**, deployed from main **`de78988`** on2026-10-15 with explicit approval. It additionally supports1,000 archive references per array, official `/dataview/temp/` meal images and simplified scheduled meal-card labels. One separately approved existing-board refresh was confirmed by Discord readback; old-message cleanup completed. This does not verify native OCR recognition of the replacement official JPEG or live backfill recovery. See [verification history](docs/VERIFICATION.md).
 - Production has migrations**0001–0011**, including separately approved0009 and0011. No migrations remained pending after application. Existing original captures, notice baselines and guild routing were preserved.
 - This was a scoped rollout, not blanket permission for subsequent migrations/deployments. Inspect every future pending migration and obtain approval; keep schema/code compatible.
 - Five manual channel cards containing25 already collected notices were confirmed by Discord API readback. The2026-10-14 live collection also completed22 snapshots and one new `externalInfo` notice delivery to computing, with marker1 and Components V2 readback; this does not prove every route or visual client rendering. Old combined channel is deleted and fallback is NULL.

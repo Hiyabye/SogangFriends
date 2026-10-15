@@ -24,7 +24,7 @@ The archive uses the **existing D1 database only**. Node/GitHub Actions fetch of
 | Signed archive JSON request | 16 MiB |
 | Attachment / image references | 1,000 / 1,000 (at most 2,000 characters per URL) |
 
-The reference-count increase from100 to1,000 is approved locally but not yet deployed. The deployed Worker still rejects originals with more than100 references in either array, including SW newsletter924184 with102 image URLs. Deploy the reviewed Worker before resuming that blocked cursor; do not truncate references or reset progress.
+The reference-count increase from100 to1,000 was deployed with approval on2026-10-15 from commit`de78988`. SW newsletter924184 with102 image URLs motivated the change. Live backfill recovery has not yet been verified; resume from the existing cursor without truncating references or resetting progress.
 
 Bodies up to 1 MiB stay inline. Larger bodies use ordered `notice_archive_raw_chunks` with metadata `body_storage='chunked'`, chunk count and byte count. Readers must concatenate by `ordinal`; original identity/hash remain unchanged. Metadata, chunks and index commit atomically. JSON escaping can exhaust the request limit before the body limit. Validated stored columns remain below **1,900,000 bytes per metadata row**, with bounded chunk rows below D1's **2,000,000-byte row ceiling**. Raw HTML is not copied into job payloads.
 

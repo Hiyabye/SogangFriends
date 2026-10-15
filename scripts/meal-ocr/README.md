@@ -35,7 +35,7 @@ scripts/meal-ocr/.venv/bin/python scripts/meal-ocr/run-batch.py \
   --output scripts/meal-ocr/output/new-run --require-processed
 ```
 
-Remote meal images may use the official host's `/dataview/board/1185/` or `/dataview/temp/` directory (one filename, PNG/JPEG only). Both require HTTPS, no query/fragment/credentials, verified TLS and no redirects. The temporary upload path is used by official article941903; this support needs a Worker deployment as well as updated Actions code.
+Remote meal images may use the official host's `/dataview/board/1185/` or `/dataview/temp/` directory (one filename, PNG/JPEG only). Both require HTTPS, no query/fragment/credentials, verified TLS and no redirects. The temporary upload path is used by official article941903; Worker and Actions support was deployed/pushed with approval on2026-10-15 from commit`de78988`. Read-only source preparation passed for both retained weeks; native OCR of the replacement JPEG remains unverified.
 
 Input is one PNG/JPEG frame, at most5 MiB and20 million pixels. Image bytes/crops are local ignored artifacts, not D1 source identity. Preserve canonical official article identity, including when the article contains an inline PNG. Do not substitute stale weeks or repair contradictory observed dates from article metadata.
 
