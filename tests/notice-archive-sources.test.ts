@@ -61,6 +61,21 @@ describe('source-only notice archive',()=>{
   const body='<a href="https://example.test/news">ordinary link</a><img src="data:image/png;base64,aA==">';
   expect(parseNoticeRaw(detail(college,body,false),notice())).toMatchObject({bodyHtml:body,attachments:[],imageUrls:[]});
  });
+ it.each(['university','academicNotice'])('retains Office-local images verbatim without exporting them as web references (%s)',source=>{
+  const body='<p>Office content</p><img src="file:///C:/Users/Synthetic/AppData/Local/Temp/image001.png"><img src=" FiLe:///C:/Temp/image002.jpg"><img src="/images/example.png"><img src="data:image/png;base64,aA==">';
+  const input=source==='university'?{...universityDetail(),data:{...universityDetail().data,content:body}}:detail(college,body,false);
+  const raw=parseNoticeRaw(input,notice(source));
+  expect(raw.bodyHtml).toBe(body);expect(raw.attachments).toEqual([]);
+  expect(raw.imageUrls).toEqual([new URL('/images/example.png',notice(source).url).href]);
+ });
+ it.each(['javascript:alert(1)','https://user:pass@example.test/image.png'])('still rejects unsafe exported image references: %s',src=>{
+  const input=universityDetail();input.data.content=`<img src="${src}">`;
+  expect(()=>parseNoticeRaw(input,notice('university'))).toThrow('Unresolved archive link');
+ });
+ it('does not accept local paths as proven university attachment metadata',()=>{
+  const input=universityDetail();
+  expect(()=>parseNoticeRaw({...input,data:{...input.data,fileValue1:'file:///C:/Temp/example.pdf'}},notice('university'))).toThrow('Unresolved university attachment metadata');
+ });
  it('validates university detail ID, board and observation, retains original HTML and attachment/image references',()=>{
   const input=universityDetail();expect(parseNoticeRaw(input,notice('university'))).toMatchObject({bodyHtml:input.data.content,attachments:['https://www.sogang.ac.kr/files/example.pdf'],imageUrls:['https://www.sogang.ac.kr/images/example.png']});
   expect(()=>parseNoticeRaw({...input,data:{...input.data,configPkId:3}},notice('university'))).toThrow('detail');

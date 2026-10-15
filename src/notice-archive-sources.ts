@@ -57,7 +57,9 @@ function references(html:string,base:string):{attachments:string[];imageUrls:str
  const doc=parse(html);
  // Ordinary hyperlinks remain in the original HTML; do not mislabel them as attachments.
  const attachments=all(doc,n=>tag(n,'a')&&!!attr(n,'href')).filter(n=>('attrs'in n&&n.attrs.some(a=>a.name==='download'))||/\.(?:pdf|hwp|hwpx|docx?|xlsx?|pptx?|zip|jpe?g|png|gif)(?:[?#]|$)/i.test(attr(n,'href'))).map(n=>link(attr(n,'href'),base));
- const imageUrls=all(doc,n=>tag(n,'img')&&!!attr(n,'src')&&!/^data:/i.test(attr(n,'src'))).map(n=>link(attr(n,'src'),base));
+ // Office-pasted articles can retain author-local image paths. Like inline data images,
+ // these stay exact in the original HTML but are not downloadable web image references.
+ const imageUrls=all(doc,n=>tag(n,'img')&&!!attr(n,'src')&&!/^(?:data|file):/i.test(attr(n,'src').trim())).map(n=>link(attr(n,'src'),base));
  return {attachments:[...new Set(attachments)],imageUrls:[...new Set(imageUrls)]};
 }
 // Parse only literal tokens and parameter references from Nuxt's serialized data.

@@ -13,7 +13,7 @@ The archive uses the **existing D1 database only**. Node/GitHub Actions fetch of
 - Retain one first raw capture per `(source,id)`: exact article-body HTML, notice metadata, attachment/image URLs, capture time, version and content hash. Normal notice metadata may update independently; this is not a revision archive or proof of the latest body.
 - `notice_archive_raw` holds the original; `notice_archive` is its searchable index; `notice_archive_progress` tracks historical traversal. `raw/<source>/<id>.json` is a **logical identity**, not a file or R2 object.
 - An atomic D1 batch stores original content and its index. Replays retain the winning first capture. An old index without a D1 original is not acknowledged as complete; a separate import is required.
-- No binary attachment/image downloads, recovered pre-collection deletions, notice-model calls, derived-result tables or fake `processed/` outputs. Inline images already present in original HTML are not stripped. Treat retained HTML as untrusted data, never executable content.
+- No binary attachment/image downloads, recovered pre-collection deletions, notice-model calls, derived-result tables or fake `processed/` outputs. Inline images and Office-pasted author-local `file:` image paths already present in original HTML are not stripped. Inline `data:` and local `file:` images are excluded from exported web `imageUrls`; they are never fetched. Proven attachment metadata still requires valid web URLs. Treat retained HTML as untrusted data, never executable content.
 
 ### Size limits
 
