@@ -92,6 +92,15 @@ describe('dedicated authenticated OCR ingestion',()=>{
   expect(String(db.sqlite.prepare('SELECT data FROM meals').get()!.data)).not.toContain('base64');
   expect(count('jobs')).toBe(0);expect(db.env.JOBS.send).not.toHaveBeenCalled();
  });
+ it('accepts official temporary image uploads and rejects paths outside the allowlist',async()=>{
+  const imageUrl='https://scc.sogang.ac.kr/dataview/temp/'+encodeURIComponent('주간메뉴표 (2026).jpg');
+  const temporary={...source,imageUrl};
+  expect((await send({...lookup(),source:temporary})).status).toBe(200);
+  expect((await send({...store(),source:temporary})).status).toBe(200);
+  expect(db.sqlite.prepare('SELECT image_url FROM meal_sources').get()!.image_url).toBe(imageUrl);
+  for(const invalid of [imageUrl+'?x=1',imageUrl+'#image',imageUrl.replace('/temp/','/temp/nested/'),imageUrl.replace('scc.sogang.ac.kr','example.com'),imageUrl.replace('https:','http:'),imageUrl.replace('.jpg','.svg')])expect((await send({...lookup(),source:{...source,imageUrl:invalid}})).status).toBe(400);
+  expect(count('jobs')).toBe(0);
+ });
  it('rechecks signature freshness after streaming the body',async()=>{
   const at=Date.now(),request=await signed(lookup());
   vi.spyOn(Date,'now').mockReturnValueOnce(at).mockReturnValue(at+301000);

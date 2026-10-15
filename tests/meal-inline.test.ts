@@ -58,6 +58,24 @@ describe('official inline meal PNGs',()=>{
   vi.stubGlobal('fetch',vi.fn(async()=>new Response('small',{headers:{'content-type':'text/html','content-length':'8000000'}})));
   await expect(fetchImage(article.url)).rejects.toThrow('Source too large');
  },10_000);
+ it('accepts the official temporary upload path through parsing, download and cache',async()=>{
+  const imageUrl='https://scc.sogang.ac.kr/dataview/temp/'+encodeURIComponent('주간메뉴표 (2026)1019 최종 (1).jpg');
+  expect(parseMealImage(html(imageUrl.replace('https:','http:')),article)).toBe(imageUrl);
+  const bytes=new Uint8Array([255,216,255,224]);
+  const fetcher=vi.fn(async()=>new Response(bytes,{headers:{'content-type':'image/jpeg'}}));vi.stubGlobal('fetch',fetcher);
+  expect((await fetchImage(imageUrl)).bytes).toEqual(bytes);
+  expect(fetcher.mock.calls).toHaveLength(1);
+  vi.spyOn(Date,'now').mockReturnValue(Date.parse('2026-10-13T00:00:00Z'));
+  const db=testDatabase();try{
+   await cacheMealSources(db.env,[{...article,imageUrl}]);
+   expect((await mealImageSource(db.env,'2026-10-13'))?.imageUrl).toBe(imageUrl);
+   for(const invalid of [imageUrl+'?download=1',imageUrl+'#image',imageUrl.replace('/temp/','/temp/nested/'),imageUrl.replace('scc.sogang.ac.kr','example.com'),imageUrl.replace('https:','http:'),imageUrl.replace('.jpg','.svg')]){
+    await expect(fetchImage(invalid)).rejects.toThrow('Disallowed');
+    await expect(cacheMealSources(db.env,[{...article,imageUrl:invalid}])).rejects.toThrow();
+   }
+   expect(fetcher).toHaveBeenCalledTimes(1);
+  }finally{db.close();}
+ });
  it('keeps remote JPEG download behavior unchanged',async()=>{
   const bytes=new Uint8Array([255,216,255,224]);vi.stubGlobal('fetch',vi.fn(async()=>new Response(bytes,{headers:{'content-type':'image/jpeg'}})));
   const result=await fetchImage('https://scc.sogang.ac.kr/dataview/board/1185/synthetic.jpg');expect(result.bytes).toEqual(bytes);expect(result.mime).toBe('image/jpeg');

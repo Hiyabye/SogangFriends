@@ -54,7 +54,7 @@ function capture(data:Record<string,unknown>):Capture {
  const source=raw as unknown as MealSource;
  if(!validDate(source.start)||!validDate(source.end)||!validDate(source.published)||dayDifference(source.start,source.end)!==6||new Date(`${source.start}T00:00:00Z`).getUTCDay()!==1||Math.abs(dayDifference(source.published,source.start))>45)throw new Error('Invalid OCR source period');
  if(!/^https:\/\/scc\.sogang\.ac\.kr\/front\/cmsboardview\.do\?bbsConfigFK=1185&siteId=dormitory&pkid=[1-9]\d{0,19}$/.test(source.url))throw new Error('Invalid OCR source URL');
- if(source.imageUrl!==source.url&&!/^https:\/\/scc\.sogang\.ac\.kr\/dataview\/board\/1185\/[^/?#]+\.(?:png|jpe?g)$/i.test(source.imageUrl))throw new Error('Invalid OCR image URL');
+ if(source.imageUrl!==source.url&&!/^https:\/\/scc\.sogang\.ac\.kr\/dataview\/(?:board\/1185|temp)\/[^/?#]+\.(?:png|jpe?g)$/i.test(source.imageUrl))throw new Error('Invalid OCR image URL');
  if(new URL(source.url).href!==source.url||new URL(source.imageUrl).href!==source.imageUrl)throw new Error('Noncanonical OCR source URL');
  if(typeof data.imageHash!=='string'||! /^[a-f0-9]{64}$/.test(data.imageHash)||data.version!==OCR_VERSION)throw new Error('Invalid OCR processing identity');
  retained(source);

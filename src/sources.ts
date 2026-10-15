@@ -150,7 +150,7 @@ export function parseMealImage(input:string,article:{url:string;start:string;end
  if(reference.startsWith('data:')){inlineMealPng(reference);return article.url;}
  const u=new URL(reference,article.url);if(u.protocol==='http:'&&u.hostname==='scc.sogang.ac.kr')u.protocol='https:';validateImageUrl(u.href);return u.href;
 }
-function validateImageUrl(url:string):void {const u=new URL(url);if(u.origin!=='https://scc.sogang.ac.kr'||!/^\/dataview\/board\/1185\/[^/]+\.(?:png|jpe?g)$/i.test(u.pathname)||u.search||u.hash||u.username||u.password)throw new Error('Disallowed meal image');}
+function validateImageUrl(url:string):void {const u=new URL(url);if(u.origin!=='https://scc.sogang.ac.kr'||!/^\/dataview\/(?:board\/1185|temp)\/[^/]+\.(?:png|jpe?g)$/i.test(u.pathname)||u.search||u.hash||u.username||u.password)throw new Error('Disallowed meal image');}
 async function mealCandidates(today:string):Promise<Omit<MealSource,'imageUrl'>[]> {
  const candidates:Omit<MealSource,'imageUrl'>[]=[],window=mealWindow(today);
  for(let page=1;page<=2;page++){
