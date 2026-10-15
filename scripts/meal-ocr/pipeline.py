@@ -68,7 +68,9 @@ def detect_geometry(image):
         raise Rejected("unsupported_vertical_grid")
     xs = columns[-8:]
     widths = [right - left for left, right in zip(xs, xs[1:])]
-    if (not .1 < xs[0] / width < .2 or not .85 < xs[-1] / width < .98
+    # The reviewed 1046px inline PNG has narrower label columns (day grid starts
+    # at x=100, 9.56%). Keep seven-column widths/alignment checks independent.
+    if (not .08 < xs[0] / width < .2 or not .85 < xs[-1] / width < .98
             or min(widths) < width * .08 or max(widths) / min(widths) > 1.3):
         raise Rejected("unsupported_column_structure")
     # A date heading alone cannot establish menu alignment. Recheck the menu

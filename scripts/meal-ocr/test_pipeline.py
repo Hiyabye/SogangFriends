@@ -45,6 +45,20 @@ def grid(dx=0):
     return picture
 
 
+def inline_grid(first_day=100, second_day=225):
+    # Measured rules from the 1046x770 official PNG, without any source text.
+    picture = Image.new("RGB", (1046, 770), "white")
+    draw = ImageDraw.Draw(picture)
+    ys = [89, 127, 290, 310, 431, 452, 472, 526, 668, 689, 709]
+    xs = [22, 60, first_day, second_day, 352, 476, 606, 734, 875, 1014]
+    for y in ys:
+        draw.line((xs[0], y, xs[-1], y), fill="black", width=3)
+    for x in xs:
+        draw.line((x, 127, x, 452), fill="black", width=3)
+        draw.line((x, 472, x, 709), fill="black", width=3)
+    return picture
+
+
 def detections(lines):
     return [{"text": text, "confidence": .99,
              "box": [[10, i * 20 + 2], [100, i * 20 + 2], [100, i * 20 + 16], [10, i * 20 + 16]]}
@@ -151,6 +165,22 @@ class GeometryTests(unittest.TestCase):
             self.assertGreater(x0, first["dayBoundaries"][i])
             self.assertLess(x1, first["dayBoundaries"][i + 1])
         self.assertEqual(first["crops"]["breakfast_common"][0], first["dayBoundaries"][0] + first["inset"])
+
+    def test_inline_png_narrow_labels_keep_all_seven_day_crops_aligned(self):
+        geometry = pipeline.detect_geometry(inline_grid())
+        boundaries = [100, 225, 352, 476, 606, 734, 875, 1014]
+        self.assertEqual(geometry["dayBoundaries"], boundaries)
+        self.assertTrue(all(not cells for cells in geometry["unknownCells"].values()))
+        for index in range(7):
+            for field in ("day_header", "breakfast_korean", "breakfast_western", "cup_rice", "dinner"):
+                box = geometry["crops"][f"{field}_{index}"]
+                self.assertEqual((box[0], box[2]), (boundaries[index] + 3, boundaries[index + 1] - 3))
+
+    def test_narrow_labels_do_not_allow_bad_offsets_or_unequal_day_widths(self):
+        for first, second in ((80, 225), (100, 170), (100, 300)):
+            with self.subTest(first=first, second=second):
+                with self.assertRaisesRegex(pipeline.Rejected, "unsupported_column_structure"):
+                    pipeline.detect_geometry(inline_grid(first, second))
 
     def test_missing_horizontal_rule_is_not_guessed(self):
         image = grid()
