@@ -47,7 +47,7 @@ No arguments also means dry-run. This performs **real read-only HTTPS requests**
 
 ## Upload configuration and approval
 
-Production is already configured; these are requirements for a new environment, not instructions to repeat activation. **Secret changes, Git push, deployment, workflow dispatch and uploads need approval.** Production Worker `23c106c8-77c3-45de-b6a9-411c3070f54c` was deployed from main `a4ce2b6` after applying separately approved0009/0011. Future changes still require their own approval.
+Production is already configured; these are requirements for a new environment, not instructions to repeat activation. **Secret changes, Git push, deployment, workflow dispatch and uploads need approval.** Production Worker `0fde8db9-b124-4757-8819-e69ac99265c4` was deployed from main `4ad27e9` on2026-10-15, including the Office-local-image backfill fix; previously approved0009/0011 remain applied. Future changes still require their own approval.
 
 1. Configure the **same** dedicated `NOTICE_INGEST_SECRET` in Worker and Actions, privately. Keep the existing D1/Queue/baselines. Do not paste secrets into chat, Git, command arguments or logs.
 2. Deploy the approved Worker/schema with `NOTICE_COLLECTION_MODE=external`. Raw capture additionally requires its own matching schema and flag; follow [NOTICE-ARCHIVE.md](NOTICE-ARCHIVE.md).

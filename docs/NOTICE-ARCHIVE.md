@@ -6,7 +6,7 @@ The archive uses the **existing D1 database only**. Node/GitHub Actions fetch of
 
 `NOTICE_ARCHIVE_ENABLED=true` is checked into `wrangler.toml`; production archive activation and the initial six-source historical start were approved in 2026-10. This does **not** establish complete history or authorize starting missing historical cursors for the five later sources. See [VERIFICATION.md](VERIFICATION.md) for observed outcomes rather than inferring them from flags.
 
-**Production now includes the chunk implementation.** With explicit approval on2026-10-14, migrations0009 and0011 were applied and main `a4ce2b6` deployed as Worker `23c106c8-77c3-45de-b6a9-411c3070f54c`. All migrations0001–0011 are applied. Meal migration0011 changes report deduplication, not notice retention. This supersedes the earlier isolated channel-only build; future rollouts still need approval.
+**Production now includes the chunk implementation.** With explicit approval on2026-10-14, migrations0009 and0011 were applied. The latest approved Worker is `0fde8db9-b124-4757-8819-e69ac99265c4` from main `4ad27e9` (2026-10-15), including the Office-local-image backfill fix. All migrations0001–0011 are applied. Meal migration0011 changes report deduplication, not notice retention. This supersedes the earlier isolated channel-only build; future rollouts still need approval.
 
 ## Storage contract
 
