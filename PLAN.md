@@ -1,7 +1,7 @@
 # Library seat availability alerts
 
 Status: released with explicit user approval on2026-10-16 KST.
-Worker `f3250fd2-30da-4099-8c72-4be25d865383` from `96e5148`; migration0013, guild command registration, validated channel configuration and push completed. Automatic collection, silent baseline and one natural full→available alert through the ordinary outbox/Queue verified by D1 and Discord readback. One separate explicitly labelled no-mention channel test was also confirmed.
+Current Worker `4030f135-2b8d-470a-8bec-e962d250b502` from `3ede134`: six-seat exclusion policy, migration0014 and10:00–21:59 KST schedule deployed; command-description readback and push completed. Automatic21:31/21:32 checks confirmed eligible remaining0 and a silent new-policy baseline, without new delivery intents. Initial aggregate rollout (`f3250fd2-30da-4099-8c72-4be25d865383` from `96e5148`) independently verified automatic collection, a silent baseline, one natural outbox/Queue alert and a separate no-mention channel test. That earlier alert does not prove filtered-alert delivery.
 
 ## Confirmed product decisions
 
@@ -45,7 +45,7 @@ User approved implementation, tests, additive policy migration, deployment, push
 - Migration0014 adds nullable `library_watches.seat_policy`. The current explicit exclusion-policy marker distinguishes legacy aggregate counts. First policy observation is silent, even at the same timestamp; queued old-policy alerts cannot send. Preserve existing history and routes.
 - Cron becomes`* 1-12 * * *` UTC; expiry cutoff becomes22:00 KST. Ignore the retired Cron expression during propagation so ordinary jobs are not accelerated.
 - Render eligible96-seat availability, explicit exclusions and a link directly to the seat map. No dependencies or extra per-minute requests.
-- Local full check passed:578 Vitest tests/30 files, TypeScript and14 Node OCR-client tests. Bundle dry-run and independent review passed. Deployment/readback results follow in verification history.
+- Local full check passed:578 Vitest tests/30 files, TypeScript and14 Node OCR-client tests. Bundle dry-run and independent review passed. Only0014 was pending remotely; applied it before deployment at21:19:55 KST. No migrations remain pending. Updated the existing five guild commands and read back the10–22 description; no channel settings were changed. Push CI38899803369 passed. A one-request isolated remote preview validated the live detail parser (eligible96, used95, remaining1). Automatic production21:31/21:32 checks succeeded, stored eligible remaining0/current policy and silently cleared the old event. No new intent/send was created; ordinary quarter-hour health remained good. See verification history. Natural filtered-alert delivery and live10:00/22:00 boundaries remain unverified.
 
 ## Implemented boundaries
 
