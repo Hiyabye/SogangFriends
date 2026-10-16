@@ -25,6 +25,7 @@ Use **Node >=24**, npm and the committed `package-lock.json`. TypeScript runs in
 | Snapshot HMAC ingress | `src/notice-ingest.ts` |
 | Raw archive, pagination and D1 limits | `src/notice-archive*.ts`, `scripts/notice-archive-client.mjs` |
 | Recent collection / historical traversal | `scripts/notice-collector.mjs`, `scripts/backfill-notices.mjs` |
+| Library availability source/state (local only) | `src/library-source.ts`, `src/library.ts`, local migration0013 |
 | Meal observations, cache and retention | `src/meal-ocr.ts`, `src/meal-cache.ts`, `src/meals.ts` |
 | Native OCR and ingestion client | `scripts/meal-ocr/` |
 | Discord presentation / board state | `src/*-card.ts`, `src/message-board.ts`, `src/schedule-summary.ts` |
@@ -110,6 +111,14 @@ Production supports22 boards in six groups. The Engineering expansion was deploy
 - Recheck date/slot/configuration after downloads. Morning reports expire at 17:30, evening at midnight KST. Legacy delivery payloads without date metadata remain text/link-only.
 - Keep `/internal/meal-compare` at410 and retire delayed `meal-extract` jobs **before** claim increments without changing original payload, attempts, errors or reservations. Keep legacy job readers and operator quarantine; these protect durable history, not active inference. No automatic restoration of rejected menus.
 - [OCR implementation/tests](scripts/meal-ocr/README.md) documents supported layouts, model hashes, locked environments and local verification. Evaluation snapshots and `evaluate.py` helpers have active consumers; do not remove them as obsolete experiments.
+
+## Library seat alerts — local implementation only
+
+- Approved local scope: only `room_no=5`, **133 로욜라 인벤툼 II**. Fixed official HTTPS origin on port444; never weaken notice URL/TLS guards. Parser uses CP949-compatible decoding and rejects missing/ambiguous rows, inconsistent counts and stale timestamps. No AI/OCR, seat-level processing or historical occupancy storage.
+- Additional library Cron `* 0-11 * * *` is **09:00–20:59 KST**, routed separately from ordinary quarter-hour work. One bounded scheduled fetch serves all configured allowlisted guilds; no per-minute durable poll jobs. No configured destination means no library source requests. No missed-tick replay.
+- Alert only observed0→positive, rearming at0, with no mentions or extra cooldown. Initial/new-route/daily observations and gaps >=3 minutes establish silent baselines. Source freshness <=2 minutes; intent expiry <=source+2 minutes and21:00. Recheck route, current cycle, day, freshness and availability before POST. State and outbox commit atomically with CAS; retry competing newer observations rather than silently dropping them.
+- Local migration0013 adds `guilds.library_channel` and `library_watches`. `/setup library` reuses admin/channel permission checks. Intended channel `1560616038272475137` is user-supplied but not live-validated/configured. Do not hard-code it. Unknown/interrupted POST uses the existing uncertain-send rules.
+- **Not deployed or activated.** Remote migration0013, deployment/schedules, command registration, channel setup, recurring collection and live test messages each require approval. Node verified fetch/parser success is not Worker connectivity or delivery proof. Verify source collection guidance and Worker TLS/encoding before activation. See [plan](PLAN.md).
 
 ## Schedules
 

@@ -4,7 +4,8 @@ compatibility_date = "2026-10-09"
 workers_dev = true
 
 [triggers]
-crons = ["*/15 * * * *"]
+# Library reads: 09:00–20:59 KST; dispatched separately from ordinary quarter-hour work.
+crons = ["*/15 * * * *", "* 0-11 * * *"]
 
 [vars]
 DISCORD_APPLICATION_ID = "1558118082914943086"

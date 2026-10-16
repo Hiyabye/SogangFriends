@@ -7,6 +7,7 @@ import {batchNoticeCards,noticeCardMessage} from './notice-card';
 import { addDays, todayKst, validDate } from './time';
 import {boardHash,cleanupMealMessage,updateBoard} from './message-board';
 import {mealCard} from './meal-card';
+import {libraryDeliveryCurrent} from './library.ts';
 import { validateSchedules } from './schedule';
 import { updateScheduleSummary } from './schedule-summary';
 import { claim, deliveryIntent, deliveryIntentStatements, dispatch, enqueue, nowIso, recover, retryJob, saveNotices, sourceFailure } from './storage';
@@ -247,7 +248,11 @@ export async function executeJob(env:Env,job:Job) {
  if(!allowedGuild(row.guild_id,env)){await env.DB.prepare("UPDATE deliveries SET state='failed',error='guild disabled' WHERE id=?").bind(payload.deliveryId).run();break;}
  // Keep file bytes transient; the durable intent carries only the meal date/slot.
  let content:DiscordMessageInput;
- try{content=payload.mealDate&&payload.mealSlot?await mealReportResponse(env,payload.mealDate,payload.mealSlot):payload.mealDate?await mealCommandResponse(env,payload.mealDate):payload.noticeCard?noticeCardMessage(payload.noticeCard):row.content;}
+ try{
+ if(Object.hasOwn(payload,'libraryEvent')&&!await libraryDeliveryCurrent(env,row.guild_id,row.channel_id,payload.libraryEvent)){
+  await env.DB.prepare("UPDATE deliveries SET state='expired',updated_at=? WHERE id=? AND state='sending'").bind(nowIso(),payload.deliveryId).run();break;
+ }
+ content=payload.mealDate&&payload.mealSlot?await mealReportResponse(env,payload.mealDate,payload.mealSlot):payload.mealDate?await mealCommandResponse(env,payload.mealDate):payload.noticeCard?noticeCardMessage(payload.noticeCard):row.content;}
  catch(error){
   // No Discord POST has started: release only this definite pre-send failure for safe retry.
   await env.DB.prepare("UPDATE deliveries SET state='retry',error='Delivery preparation failed',updated_at=? WHERE id=? AND state='sending'").bind(nowIso(),payload.deliveryId).run();
