@@ -1,5 +1,5 @@
 import type { Schedule } from './types';
-import { addDays, todayKst, validDate } from './time';
+import { addDays, todayKst, validDate } from './time.ts';
 
 function deadlineDate(item: Schedule): string | undefined {
   return item.deadlineDate ?? (item.deadlineAt ? todayKst(new Date(item.deadlineAt)) : undefined);
