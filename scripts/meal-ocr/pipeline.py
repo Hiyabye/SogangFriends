@@ -45,7 +45,9 @@ def detect_geometry(image):
     warm = (red > 170) & (green < 190) & (blue < 130)
     dark = rgb.max(axis=2) < 120
     mask = (warm | dark).astype("uint8") * 255
-    line = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((1, round(width * .55)), np.uint8))
+    # Highlight borders can shift a row rule by a few pixels mid-table. Keep
+    # long segments before grouping nearby rows; require >55% total coverage.
+    line = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((1, round(width * .35)), np.uint8))
     ys = [round(sum(row) / len(row)) for row in groups(
         np.flatnonzero((line > 0).sum(axis=1) > width * .55), max(2, round(height * .004)))]
     if len(ys) != 11 or not .07 < ys[0] / height < .2 or not .8 < ys[-1] / height < .96:

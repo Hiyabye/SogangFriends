@@ -182,6 +182,33 @@ class GeometryTests(unittest.TestCase):
                 with self.assertRaisesRegex(pipeline.Rejected, "unsupported_column_structure"):
                     pipeline.detect_geometry(inline_grid(first, second))
 
+    def test_highlight_border_shift_preserves_observed_horizontal_rule(self):
+        # Official replacement JPEG f28b397c has a red dinner highlight spanning
+        # Tue--Fri; its top sits a few pixels above the orange cup/dinner rule.
+        picture = Image.new("RGB", (3508, 2480), "white")
+        draw = ImageDraw.Draw(picture)
+        ys = [314, 433, 942, 1007, 1387, 1452, 1516, 1688, 2130, 2196, 2261]
+        xs = [195, 318, 441, 834, 1234, 1625, 2031, 2436, 2879, 3312]
+        for y in ys:
+            draw.line((xs[0], y, xs[-1], y), fill="black", width=3)
+        for x in xs:
+            draw.line((x, ys[1], x, ys[5]), fill="black", width=3)
+            draw.line((x, ys[6], x, ys[-1]), fill="black", width=3)
+        # Neither uninterrupted portion is 55% of image width. Both portions
+        # must be detected, not a guessed row inserted from expected spacing.
+        draw.rectangle((834, 1684, 2436, 1692), fill="white")
+        draw.line((834, 1686, 2436, 1686), fill="red", width=5)
+        geometry = pipeline.detect_geometry(picture)
+        self.assertEqual(len(geometry["horizontalRules"]), 11)
+        self.assertLessEqual(abs(geometry["horizontalRules"][7] - 1688), 3)
+        self.assertEqual(geometry["dayBoundaries"], xs[-8:])
+        self.assertTrue(all(not cells for cells in geometry["unknownCells"].values()))
+        # A single short fragment still cannot stand in for a table-wide rule.
+        draw.rectangle((0, 1680, 3507, 1695), fill="white")
+        draw.line((834, 1685, 2436, 1685), fill="red", width=3)
+        with self.assertRaisesRegex(pipeline.Rejected, "unsupported_horizontal_grid"):
+            pipeline.detect_geometry(picture)
+
     def test_missing_horizontal_rule_is_not_guessed(self):
         image = grid()
         ImageDraw.Draw(image).rectangle((0, 377, 1999, 383), fill="white")
