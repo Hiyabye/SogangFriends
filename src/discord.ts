@@ -208,7 +208,7 @@ export const COMMANDS = [
     ...NOTICE_GROUPS.map(group=>({name:group.id,description:`${group.name} 공지 발송 채널`,type:7,channel_types:[0,5]})),
     { name: 'meals', description: '식단 발송 채널', type: 7, channel_types: [0, 5] },
     { name: 'schedule', description: '학사 일정 발송 채널', type: 7, channel_types: [0, 5] },
-    { name: 'library', description: '인벤툼 II 잔여 좌석 알림 채널 (09–21시)', type: 7, channel_types: [0, 5] },
+    { name: 'library', description: '인벤툼 II 잔여 좌석 알림 채널 (10–22시)', type: 7, channel_types: [0, 5] },
   ] },
   { name: 'status', description: '관리자용 수집·작업·발송 상태', default_member_permissions: '32' },
 ].map(command => ({ ...command, type: 1, contexts: [0], integration_types: [0], dm_permission: false }));

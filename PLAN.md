@@ -5,13 +5,13 @@ Worker `f3250fd2-30da-4099-8c72-4be25d865383` from `96e5148`; migration0013, gui
 
 ## Confirmed product decisions
 
-- Monitor only **133 로욜라 인벤툼 II**, source `room_no=5` (102 seats observed). User confirmed that earlier “131” wording meant this source room.
-- Check once per minute during **09:00 <= time < 21:00 KST** (up to 720 scheduled requests/day). No night polling or missed-window replay.
-- Alert only on an observed **0 remaining → 1+** transition. Rearm after observing 0 again; positive-to-positive changes are silent. No additional cooldown was approved or added.
+- Monitor only **133 로욜라 인벤툼 II**, source `room_no=5` (102 seats observed; **96 eligible** after excluding disability seats1,3,44,85 and recliners101,102). User confirmed that earlier “131” wording meant this source room.
+- Check once per minute during **10:00 <= time < 22:00 KST** (up to 720 scheduled requests/day). No night polling or missed-window replay.
+- Alert only on an observed **0 eligible remaining → 1+** transition. Rearm after observing 0 again; positive-to-positive changes are silent. No additional cooldown was approved or added.
 - Shared Discord channel, no mentions. Destination: **1560616038272475137** in guild1558118900347183374; ownership/type/effective View+Send permissions validated and D1 configuration read back. Not hard-coded.
 - First successful observation each morning is a silent baseline, even when seats are available.
 - After a prolonged gap, resume with a silent baseline rather than report an old opening.
-- No command for seat lookup, dashboard, history/predictions, individual seat processing, subscriptions or AI/OCR in this release.
+- No command for seat lookup, dashboard, history/predictions, subscriptions or AI/OCR. The approved follow-up processes individual seat statuses solely to compute eligible availability; it stores no individual seat history.
 
 ## Approved engineering contract
 
@@ -23,7 +23,7 @@ User explicitly approved local implementation/tests and then this minimal design
 - Reuse existing durable delivery outbox and its conservative uncertain/interrupted POST handling.
 - Prolonged gap = **at least 3 minutes** since the previous valid observation or upstream timestamp. Initial/new-channel/day-change observations are silent too.
 - Source timestamps must be no older than **2 minutes**; future tolerance is 30 seconds.
-- Alert expires within **2 minutes of its source observation**, capped at **21:00 KST**. Check current destination, source/retrieval freshness, day, positive availability and event identity before sending. Expired/superseded alerts are not replayed.
+- Alert expires within **2 minutes of its source observation**, capped at **22:00 KST**. Check current destination, source/retrieval freshness, day, positive availability and event identity before sending. Expired/superseded alerts are not replayed.
 
 ## Evidence and limitations
 
@@ -33,15 +33,25 @@ Bounded public requests on 2026-10-16 established server-rendered HTML with room
 
 The page requests a browser refresh every 60 seconds; actual backend cadence is unverified. The expected-release table has ambiguous bucket semantics and the inspected detail page exposes seat overlays; neither is used.
 
-Remaining counts are allocation-system information, not reservations or proof of physical emptiness. Disability seats can be included; do not subtract all disability capacity to invent unrestricted availability. Brief openings between checks may be missed. Public accessibility does not establish permission for automated collection. Read-only official-site policy searches found no applicable explicit collection policy; a bounded robots.txt request returned404. This is unresolved guidance, not affirmative permission. User explicitly authorized activation at the bounded cadence; respect any subsequently identified source restriction.
+Remaining counts are allocation-system information, not reservations or proof of physical emptiness. Use the user's six explicit excluded seat IDs, not a subtraction of six from the overall free-seat count. Brief openings between checks may be missed. Public accessibility does not establish permission for automated collection. Read-only official-site policy searches found no applicable explicit collection policy; a bounded robots.txt request returned404. This is unresolved guidance, not affirmative permission. User explicitly authorized activation at the bounded cadence; respect any subsequently identified source restriction.
 
 Current repository instructions/read-only history show Engineering already deployed with migration0012. Earlier discovery notes about local-only Engineering were stale; preserve the actual current deployment boundary in AGENTS.md. Migration0013 is now deployed with separate user approval.
+
+## Approved follow-up — six-seat exclusions and 10am–10pm
+
+User approved implementation, tests, additive policy migration, deployment, push and operational verification, then changed the window to10:00–22:00 KST. No test messages or artificial seat state are authorized/needed for this follow-up.
+
+- Switch the single minute request to the fixed official `roomview5.asp?room_no=5` detail page. Validate all102 unique red/gray seat states, explicit legend, room/background identity, same-page counts and source timestamp. Count only the96 eligible seats; free excluded seats alone must remain0 eligible remaining.
+- Migration0014 adds nullable `library_watches.seat_policy`. The current explicit exclusion-policy marker distinguishes legacy aggregate counts. First policy observation is silent, even at the same timestamp; queued old-policy alerts cannot send. Preserve existing history and routes.
+- Cron becomes`* 1-12 * * *` UTC; expiry cutoff becomes22:00 KST. Ignore the retired Cron expression during propagation so ordinary jobs are not accelerated.
+- Render eligible96-seat availability, explicit exclusions and a link directly to the seat map. No dependencies or extra per-minute requests.
+- Local full check passed:578 Vitest tests/30 files, TypeScript and14 Node OCR-client tests. Bundle dry-run and independent review passed. Deployment/readback results follow in verification history.
 
 ## Implemented boundaries
 
 - `src/library-source.ts`: fixed HTTPS origin/port, verified platform TLS, no redirects, 8-second total deadline, 256 KiB streaming limit, fatal legacy decoding and strict target-table/timestamp/count validation. Sanitized errors only.
 - `src/library.ts`: one shared fetch per scheduled tick, latest per-guild state, bounded CAS retry for competing snapshots, atomic state+outbox commit, event-specific send guards and generic library health.
-- `wrangler.toml` / `src/worker.ts`: additional `* 0-11 * * *` UTC Cron routed separately from existing `*/15 * * * *`. Source fetch is bounded in the scheduled handler, avoiding 720 durable poll jobs/day and avoiding network polling in the single-concurrency Queue. Only opening events enter the existing outbox.
+- `wrangler.toml` / `src/worker.ts`: additional `* 1-12 * * *` UTC Cron routed separately from existing `*/15 * * * *`. Source fetch is bounded in the scheduled handler, avoiding 720 durable poll jobs/day and avoiding network polling in the single-concurrency Queue. Only opening events enter the existing outbox.
 - `src/discord.ts`, `src/worker.ts`, `src/status.ts`: setup definition/validation and channel/health visibility. New channel settings silently establish a baseline at the next poll.
 - `src/jobs.ts`: library eligibility check before ordinary durable delivery. Unknown POST remains uncertain, never blindly retried.
 - `tests/library-source.test.ts`, `tests/library.test.ts` and existing command-definition assertion: parser/fetch, real SQLite, concurrency, rollback, transitions, routing, setup, health, expired/unknown sends and mention safety.

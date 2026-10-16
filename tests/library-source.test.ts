@@ -1,10 +1,14 @@
 import {describe,it,expect,vi,afterEach} from 'vitest';
 import {LIBRARY_URL,parseLibrarySnapshot,fetchLibrarySnapshot} from '../src/library-source.ts';
 const now=Date.parse('2026-10-16T11:24:20Z');
-const row=(room='5',label='133 로욜라 인벤툼 II')=>`<tr><td>2</td><td><a href="roomview5.asp?room_no=${room}">${label}</a></td><td>102 <font color=blue>(4)</font></td><td>100</td><td>2</td><td><img alt="98.04 %">98.04 %</td><td style="display:none">5</td></tr>`;
-const head='<tr><td>순번</td><td>열람실명</td><td>전체 좌석수</td><td>사용 좌석수</td><td>잔여 좌석수</td><td>이용율(%)</td><td>순번</td></tr>';
-const stamp='<tr><td colspan="7">2026-10-16&nbsp;오후 8:24:20 현재&nbsp;</td></tr>';
-const html=(rows=row())=>`<html><head><!-- 2020-01-01 오전 1:00:00 현재 --></head><body><table>${stamp}${head}${row('19','111 로욜라 인벤툼Ⅰ')}${rows}</table><table><tr><td>좌석 해지 예상 시간표</td></tr>${stamp}</table></body></html>`;
+const excluded=[1,3,44,85,101,102];
+const stamp='2026-10-16&nbsp;오후 8:24:20 현재';
+const seat=(id:number,free=false)=>`<div id="Layer${id}" style="position:absolute; width:${excluded.includes(id)?1:38}px"><table><tr><td bgcolor="${free?'gray':'red'}"><font style="color:yellow">${id}</font></td></tr></table></div>`;
+const legend='<table><tr><td bgcolor="red">사용중</td><td></td><td bgcolor="gray">미사용</td></tr></table>';
+const summary=(free=2)=>`<table><tr><td><b>133 로욜라 인벤툼 II</b></td><td>총 좌석수 : <b>102</b></td><td>사용 좌석수 : <b>${102-free}</b></td><td>잔여 좌석수 : <b>${free}</b></td><td>${stamp}</td></tr></table>`;
+const map=(free=[2,84])=>`<div id="maptemp"><div id="backimage"><img src="./MAP/5-back.jpg"></div>${Array.from({length:102},(_,i)=>seat(i+1,free.includes(i+1))).join('')}</div>`;
+// Original synthetic markup represents the observed same-response summary/legend/map contract.
+const html=(free=[2,84])=>`<html><body>${legend}${summary(free.length)}${map(free)}</body></html>`;
 const asciiEntities=(s:string)=>s.replace(/[^\x00-\x7f]/g,c=>`&#${c.codePointAt(0)};`);
 function encodedPage():Uint8Array{
  // Real CP949 room-name bytes mixed with ASCII entity markup, not UTF-8 masquerading as EUC-KR.
@@ -12,35 +16,76 @@ function encodedPage():Uint8Array{
  return Uint8Array.from(Buffer.concat([Buffer.from(parts[0]),Buffer.from('b7cebfe7b6f320c0cebaa5c5f9','hex'),Buffer.from(parts[1])]));
 }
 afterEach(()=>{vi.unstubAllGlobals();vi.restoreAllMocks();vi.useRealTimers();});
-describe('library source parser',()=>{
- it('selects room identity, not row position; ignores disability capacity in total and unrelated timestamps',()=>{
-  expect(parseLibrarySnapshot(html(),now)).toEqual({total:102,used:100,remaining:2,sourceAt:'2026-10-16T11:24:20.000Z'});
-  expect(parseLibrarySnapshot(html(row('6','K관 열람실')+row()),now).remaining).toBe(2);
+describe('library detailed seat source parser',()=>{
+ it('counts only eligible seats using the room-5 map and its own summary timestamp',()=>{
+  expect(parseLibrarySnapshot(html(),now)).toEqual({total:96,used:94,remaining:2,sourceAt:'2026-10-16T11:24:20.000Z'});
+  expect(LIBRARY_URL).toBe('https://libseat.sogang.ac.kr:444/SEAT/roomview5.asp?room_no=5');
  });
- it('normalizes whitespace and equivalent roman numeral labels',()=>{
-  expect(parseLibrarySnapshot(html(row('5','133&nbsp; 로욜라\n 인벤툼 Ⅱ')),now).total).toBe(102);
+ it('normalizes summary whitespace and equivalent roman numeral labels',()=>{
+  expect(parseLibrarySnapshot(html().replace('133 로욜라 인벤툼 II','133&nbsp; 로욜라\n 인벤툼 Ⅱ'),now).total).toBe(96);
+ });
+ it.each(excluded)('does not count excluded seat %s even when it is the only free seat',id=>{
+  expect(parseLibrarySnapshot(html([id]),now)).toMatchObject({total:96,used:96,remaining:0});
+ });
+ it('counts zero available eligible seats when all six excluded seats are free',()=>{
+  expect(parseLibrarySnapshot(html(excluded),now)).toMatchObject({total:96,used:96,remaining:0});
+ });
+ it('counts only eligible availability in a mixed map rather than subtracting six from the free count',()=>{
+  expect(parseLibrarySnapshot(html([1,3,44,85,101,102,2,100]),now)).toMatchObject({total:96,used:94,remaining:2});
+  expect(parseLibrarySnapshot(html([84]),now).remaining).toBe(1);
+ });
+ it.each([{free:[]},{free:Array.from({length:102},(_,i)=>i+1)}])('handles fully occupied and fully available maps ($free)',({free})=>{
+  expect(parseLibrarySnapshot(html(free),now)).toMatchObject({total:96,used:free.length?0:96,remaining:free.length?96:0});
+ });
+ it('uses seat identity and legend rather than layer order or the tiny disabled-seat drawing size',()=>{
+  const reordered=html().replace(map(),`<div id="maptemp"><div id="backimage"><img src="./MAP/5-back.jpg"></div>${Array.from({length:102},(_,i)=>seat(102-i,[2,84].includes(102-i))).join('')}</div>`);
+  expect(parseLibrarySnapshot(reordered,now).remaining).toBe(2);
+  expect(parseLibrarySnapshot(html([2]),now).remaining).toBe(1);
  });
  it.each([
-  ['missing target',()=>html('')],
-  ['duplicate target',()=>html(row()+row())],
-  ['wrong label',()=>html(row('5','131 로욜라 인벤툼 II'))],
-  ['foreign origin',()=>html().replace('href="roomview5.asp?room_no=5"','href="https://example.com/SEAT/roomview5.asp?room_no=5"')],
-  ['ambiguous room query',()=>html().replace('room_no=5"','room_no=5&amp;room_no=6"')],
-  ['partial target row',()=>html(row().slice(0,row().indexOf('<td>100')))],
-  ['missing aggregate header',()=>html().replace('전체 좌석수','다른 값')],
-  ['incorrect arithmetic',()=>html(row().replace('<td>100</td>','<td>99</td>'))],
-  ['negative remaining',()=>html(row().replace('<td>2</td><td><img','<td>-2</td><td><img'))],
-  ['wrong occupancy',()=>html(row().replace('>98.04 %</td>','>50 %</td>'))],
-  ['disability capacity exceeds total',()=>html(row().replace('(4)','(103)'))],
-  ['missing disability annotation',()=>html(row().replace('<font color=blue>(4)</font>',''))],
-  ['duplicate source timestamp',()=>html().replace(head,stamp+head)],
-  ['invalid calendar date',()=>html().replaceAll('2026-10-16','2026-02-30')],
-  ['invalid 12-hour time',()=>html().replaceAll('오후 8:24:20','오후 0:24:20')],
-  ['invalid minute',()=>html().replaceAll('8:24:20','8:60:20')],
-  ['detail page rather than aggregate table',()=>`<table>${stamp}${row()}</table>`],
+  ['missing summary',()=>legend+map()],
+  ['duplicate summary',()=>html()+summary()],
+  ['wrong room label',()=>html().replace('133 로욜라 인벤툼 II','131 로욜라 인벤툼 II')],
+  ['wrong summary total',()=>html().replace('총 좌석수 : <b>102','총 좌석수 : <b>103')],
+  ['incorrect summary arithmetic',()=>html().replace('사용 좌석수 : <b>100','사용 좌석수 : <b>99')],
+  ['negative remaining',()=>html().replace('잔여 좌석수 : <b>2','잔여 좌석수 : <b>-2')],
+  ['missing summary label',()=>html().replace('총 좌석수','전체 좌석')],
+  ['missing timestamp',()=>html().replace(stamp,'')],
+  ['duplicate summary timestamp',()=>html().replace(stamp,stamp+' '+stamp)],
+  ['invalid calendar date',()=>html().replace('2026-10-16','2026-02-30')],
+  ['invalid 12-hour time',()=>html().replace('오후 8:24:20','오후 0:24:20')],
+  ['invalid minute',()=>html().replace('8:24:20','8:60:20')],
+  ['missing map',()=>legend+summary()],
+  ['duplicate map',()=>html()+map()],
+  ['missing map identity',()=>html().replace('id="maptemp"','id="other"')],
+  ['missing background identity',()=>html().replace('id="backimage"','id="other"')],
+  ['duplicate background',()=>html().replace('<div id="backimage">','<div id="backimage"></div><div id="backimage">')],
+  ['wrong room background',()=>html().replace('5-back.jpg','6-back.jpg')],
+  ['foreign background',()=>html().replace('./MAP/5-back.jpg','https://example.com/SEAT/MAP/5-back.jpg')],
+  ['background query',()=>html().replace('5-back.jpg','5-back.jpg?room_no=6')],
+  ['missing seat',()=>html().replace(seat(100),'')],
+  ['missing excluded seat',()=>html().replace(seat(1),'')],
+  ['duplicate seat',()=>html().replace(seat(100),seat(99))],
+  ['extra seat',()=>html().replace('</body>',seat(103)+'</body>')],
+  ['seat outside map',()=>html().replace(seat(100),'').replace('</body>',seat(100)+'</body>')],
+  ['wrong seat label',()=>html().replace(seat(100),seat(100).replace('>100</font>','>99</font>'))],
+  ['noncanonical layer ID',()=>html().replace('id="Layer1"','id="Layer01"')],
+  ['unexpected layer ID',()=>html().replace('id="Layer1"','id="Layer103"')],
+  ['unknown seat status',()=>html().replace(seat(100),seat(100).replace('bgcolor="red"','bgcolor="green"'))],
+  ['unknown excluded seat status',()=>html().replace(seat(1),seat(1).replace('bgcolor="red"','bgcolor="green"'))],
+  ['missing seat status',()=>html().replace(seat(100),seat(100).replace('bgcolor="red"',''))],
+  ['duplicate status attribute',()=>html().replace(seat(100),seat(100).replace('bgcolor="red"','bgcolor="red" bgcolor="gray"'))],
+  ['contradictory inline background',()=>html().replace(seat(100),seat(100).replace('bgcolor="red"','bgcolor="red" style="background-color:gray"'))],
+  ['ambiguous extra status cell',()=>html().replace(seat(100),seat(100).replace('</tr>','<td bgcolor="gray">100</td></tr>'))],
+  ['summary/map disagreement',()=>html().replace(seat(100),seat(100,true))],
+  ['missing legend',()=>html().replace(legend,'')],
+  ['reversed legend',()=>html().replace('bgcolor="red">사용중','bgcolor="gray">사용중')],
+  ['duplicate legend',()=>html()+legend],
+  ['unrecognized extra map cell',()=>html().replace(seat(100),seat(100)+'<table><tr><td bgcolor="gray">103</td></tr></table>')],
  ] as const)('rejects %s',(_name,make)=>{expect(()=>parseLibrarySnapshot(make(),now)).toThrow('Invalid library snapshot');});
- it('takes timestamp only from target aggregate table',()=>{
-  expect(()=>parseLibrarySnapshot(html().replace(stamp,''),now)).toThrow();
+ it('ignores unrelated timestamps, including comments, without using them to repair missing summary dates',()=>{
+  expect(parseLibrarySnapshot(html()+'<table><tr><td>1999-01-01 오전 1:00:00 현재</td></tr></table><!-- invalid date -->',now).remaining).toBe(2);
+  expect(()=>parseLibrarySnapshot(html().replace(stamp,'')+`<table><tr><td>${stamp}</td></tr></table>`,now)).toThrow();
  });
  it('enforces source age and future tolerance at their boundaries',()=>{
   expect(parseLibrarySnapshot(html(),now+120000).remaining).toBe(2);
@@ -49,17 +94,18 @@ describe('library source parser',()=>{
   expect(()=>parseLibrarySnapshot(html(),now-30001)).toThrow();
  });
  it('converts noon and midnight without inferring dates',()=>{
-  const noon=html().replaceAll('오후 8:24:20','오후 12:24:20');
+  const noon=html().replace('오후 8:24:20','오후 12:24:20');
   expect(parseLibrarySnapshot(noon,Date.parse('2026-10-16T03:24:20Z')).sourceAt).toBe('2026-10-16T03:24:20.000Z');
-  const midnight=html().replaceAll('오후 8:24:20','오전 12:24:20');
+  const midnight=html().replace('오후 8:24:20','오전 12:24:20');
   expect(parseLibrarySnapshot(midnight,Date.parse('2026-10-15T15:24:20Z')).sourceAt).toBe('2026-10-15T15:24:20.000Z');
  });
 });
 describe('bounded library collection',()=>{
- it('decodes real CP949 bytes with fixed URL and no redirect following',async()=>{
+ it('decodes real CP949 bytes with fixed detail URL and no redirect following',async()=>{
   vi.useFakeTimers();vi.setSystemTime(now);
   const fetcher=vi.fn(async()=>new Response(encodedPage(),{headers:{'content-type':'text/html; charset=euc-kr'}}));vi.stubGlobal('fetch',fetcher);
-  expect(await fetchLibrarySnapshot()).toMatchObject({total:102,remaining:2,sourceAt:'2026-10-16T11:24:20.000Z'});
+  expect(await fetchLibrarySnapshot()).toMatchObject({total:96,remaining:2,sourceAt:'2026-10-16T11:24:20.000Z'});
+  expect(fetcher).toHaveBeenCalledOnce();
   expect(fetcher).toHaveBeenCalledWith(LIBRARY_URL,expect.objectContaining({redirect:'manual',signal:expect.any(AbortSignal)}));
  });
  it.each([302,403,500])('rejects HTTP %s without exposing body',async status=>{

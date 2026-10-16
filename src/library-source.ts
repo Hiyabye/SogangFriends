@@ -1,6 +1,7 @@
 import {parse,type DefaultTreeAdapterMap} from 'parse5';
 
-export const LIBRARY_URL='https://libseat.sogang.ac.kr:444/SEAT/domian5.asp';
+export const LIBRARY_URL='https://libseat.sogang.ac.kr:444/SEAT/roomview5.asp?room_no=5';
+const EXCLUDED_SEATS=new Set([1,3,44,85,101,102]);
 export interface LibrarySnapshot {total:number;used:number;remaining:number;sourceAt:string}
 const MAX_BYTES=256*1024;
 type Node=DefaultTreeAdapterMap['node'];
@@ -13,10 +14,6 @@ function all(node:Node,test:(node:Node)=>boolean):Node[]{
  return found;
 }
 function text(node:Node):string{return all(node,n=>n.nodeName==='#text').map(n=>'value'in n?n.value:'').join('').normalize('NFKC').replace(/\s+/g,' ').trim();}
-function ancestor(node:Node,name:string):Node|undefined{
- let parent='parentNode'in node?node.parentNode:null;
- while(parent){if(tag(parent,name))return parent;parent='parentNode'in parent?parent.parentNode:null;}
-}
 function invalid():never{throw new Error('Invalid library snapshot');}
 function integer(value:string):number{
  if(!/^\d+$/.test(value))invalid();
@@ -32,30 +29,55 @@ function sourceTime(value:string,now:number):string{
  if(!Number.isFinite(at)||new Date(at+9*3600_000).toISOString().slice(0,19)!==local||at<now-120_000||at>now+30_000)invalid();
  return new Date(at).toISOString();
 }
-/** Parse only the room's own aggregate table; detail maps and release estimates are not evidence. */
+/** Read all seat states before excluding the user-selected disability/recliner seats. */
 export function parseLibrarySnapshot(html:string,now=Date.now()):LibrarySnapshot{
  if(!Number.isFinite(now)||new TextEncoder().encode(html).length>MAX_BYTES*3)invalid();
- const doc=parse(html);
- const links=all(doc,n=>{
-  if(!tag(n,'a'))return false;
-  try{const u=new URL(attr(n,'href'),LIBRARY_URL);return u.origin===new URL(LIBRARY_URL).origin&&u.pathname==='/SEAT/roomview5.asp'&&!u.username&&!u.password&&!u.hash&&u.searchParams.size===1&&u.searchParams.get('room_no')==='5';}catch{return false;}
- });
- if(links.length!==1||text(links[0])!=='133 로욜라 인벤툼 II')invalid();
- const row=ancestor(links[0],'tr'),table=ancestor(links[0],'table');if(!row||!table)invalid();
- const rows=all(table,n=>tag(n,'tr')&&ancestor(n,'table')===table);
- const cells=children(row).filter(n=>tag(n,'td'));
- if(cells.length!==7||!all(cells[1],n=>n===links[0]).length)invalid();
- const headers=['순번','열람실명','전체 좌석수','사용 좌석수','잔여 좌석수','이용율(%)'];
- const headerRows=rows.filter(r=>{const c=children(r).filter(n=>tag(n,'td')||tag(n,'th'));return headers.every((h,i)=>c[i]&&text(c[i])===h);});
- if(headerRows.length!==1)invalid();
- const totalMatch=text(cells[2]).match(/^(\d+)\s*\((\d+)\)$/);if(!totalMatch)invalid();
- const total=integer(totalMatch[1]),accessible=integer(totalMatch[2]),used=integer(text(cells[3])),remaining=integer(text(cells[4]));
- const occupancy=text(cells[5]).match(/^(\d+(?:\.\d{1,2})?)\s*%$/);if(!occupancy)invalid();
- const percent=Number(occupancy[1]);
- if(total<1||accessible>total||used>total||remaining>total||used+remaining!==total||percent>100||Math.abs(percent-used/total*100)>0.011)invalid();
- const timestamps=rows.flatMap(r=>children(r).filter(n=>tag(n,'td')||tag(n,'th')).filter(c=>/^\d{4}-\d{2}-\d{2} /.test(text(c))).map(text));
- if(timestamps.length!==1)invalid();
- return {total,used,remaining,sourceAt:sourceTime(timestamps[0],now)};
+ // parse5 otherwise silently keeps only the first of conflicting duplicate attributes.
+ let duplicateAttribute=false;
+ const doc=parse(html,{onParseError:error=>{if(error.code==='duplicate-attribute')duplicateAttribute=true;}});
+ if(duplicateAttribute)invalid();
+ const summaries=all(doc,n=>tag(n,'tr')).map(row=>children(row).filter(n=>tag(n,'td')))
+  .filter(cells=>cells.length===5&&text(cells[0])==='133 로욜라 인벤툼 II');
+ if(summaries.length!==1)invalid();
+ const cells=summaries[0];
+ const count=(index:number,label:string)=>{
+  const match=text(cells[index]).match(new RegExp(`^${label}\\s*:\\s*(\\d+)$`));
+  if(!match)invalid();return integer(match[1]);
+ };
+ const total=count(1,'총 좌석수'),used=count(2,'사용 좌석수'),remaining=count(3,'잔여 좌석수');
+ if(total!==102||used+remaining!==total)invalid();
+ const sourceAt=sourceTime(text(cells[4]),now);
+ for(const [label,color] of [['사용중','red'],['미사용','gray']]){
+  const legend=all(doc,n=>tag(n,'td')&&text(n)===label);
+  if(legend.length!==1||attr(legend[0],'bgcolor').trim().toLowerCase()!==color)invalid();
+ }
+ const maps=all(doc,n=>attr(n,'id')==='maptemp'),backgrounds=all(doc,n=>attr(n,'id')==='backimage');
+ if(maps.length!==1||!tag(maps[0],'div')||backgrounds.length!==1)invalid();
+ const map=maps[0],background=backgrounds[0];
+ if(!children(map).includes(background)||!tag(background,'div'))invalid();
+ const images=all(background,n=>tag(n,'img'));
+ if(images.length!==1)invalid();
+ try{
+  const image=new URL(attr(images[0],'src'),LIBRARY_URL);
+  if(image.href!==new URL('./MAP/5-back.jpg',LIBRARY_URL).href)invalid();
+ }catch{invalid();}
+ const layers=all(doc,n=>/^Layer/i.test(attr(n,'id')));
+ if(layers.length!==102||all(map,n=>tag(n,'td')).length!==102)invalid();
+ const seen=new Set<number>();let mapRemaining=0,eligibleRemaining=0;
+ for(const layer of layers){
+  const match=attr(layer,'id').match(/^Layer([1-9]\d*)$/);
+  if(!match||!tag(layer,'div')||!children(map).includes(layer))invalid();
+  const seat=integer(match[1]);
+  if(seat>102||seen.has(seat))invalid();seen.add(seat);
+  const statuses=all(layer,n=>tag(n,'td'));
+  if(statuses.length!==1||text(statuses[0])!==String(seat)||text(layer)!==String(seat))invalid();
+  const color=attr(statuses[0],'bgcolor').trim().toLowerCase();
+  if(!['red','gray'].includes(color)||/background(?:-color)?\s*:/i.test(attr(statuses[0],'style')))invalid();
+  if(color==='gray'){mapRemaining++;if(!EXCLUDED_SEATS.has(seat))eligibleRemaining++;}
+ }
+ // Summary and map come from one response; do not combine two independently changing pages.
+ if(mapRemaining!==remaining)invalid();
+ return {total:96,used:96-eligibleRemaining,remaining:eligibleRemaining,sourceAt};
 }
 
 /** Fixed origin/port, verified platform TLS, no redirects, bounded streaming and lifetime. */

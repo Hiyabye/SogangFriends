@@ -1,6 +1,6 @@
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 import {testDatabase} from './helpers/db';
-import {LIBRARY_CRON,libraryDeliveryCurrent,libraryWindow,pollLibrary,saveLibrarySnapshot} from '../src/library';
+import {LIBRARY_CRON,LIBRARY_SEAT_POLICY,libraryDeliveryCurrent,libraryWindow,pollLibrary,saveLibrarySnapshot} from '../src/library';
 import * as source from '../src/library-source';
 import {consume,executeJob} from '../src/jobs';
 import {claim,recover} from '../src/storage';
@@ -15,7 +15,7 @@ const iso=(time=Date.now())=>new Date(time).toISOString();
 function configure(guild='111',destination=channel){
  db.sqlite.prepare('INSERT INTO guilds(id,library_channel,updated_at) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET library_channel=excluded.library_channel').run(guild,destination,iso());
 }
-const snapshot=(remaining:number,at=Date.now()):source.LibrarySnapshot=>({remaining,total:102,used:102-remaining,sourceAt:iso(at)});
+const snapshot=(remaining:number,at=Date.now()):source.LibrarySnapshot=>({remaining,total:96,used:96-remaining,sourceAt:iso(at)});
 const watch=(guild='111')=>db.sqlite.prepare('SELECT * FROM library_watches WHERE guild_id=?').get(guild)!;
 const count=(table:'jobs'|'deliveries'|'library_watches')=>Number(db.sqlite.prepare(`SELECT COUNT(*) n FROM ${table}`).get()!.n);
 const deliveries=()=>db.sqlite.prepare('SELECT * FROM deliveries ORDER BY created_at,id').all();
@@ -42,9 +42,26 @@ describe('library availability transitions with real SQLite',()=>{
   await observe(0,60_000);expect(watch().event_id).toBeNull();
   await observe(1,60_000);expect(watch().event_id).not.toBe(first);expect(count('deliveries')).toBe(2);
  });
+ it.each([null,'unknown-policy'])('silently replaces a %s policy observation even at the same source timestamp',async policy=>{
+  configure();await observe(0);
+  db.sqlite.prepare('UPDATE library_watches SET seat_policy=?').run(policy);
+  await observe(3);
+  expect(watch()).toMatchObject({remaining:3,seat_policy:LIBRARY_SEAT_POLICY,event_id:null});
+  expect(count('deliveries')).toBe(0);expect(count('jobs')).toBe(0);
+  await observe(0,60_000);await observe(1,60_000);
+  expect(count('deliveries')).toBe(1);
+ });
+ it('resets the policy without rewriting existing alert history',async()=>{
+  configure();const event=await opening();const before=deliveries()[0];
+  db.sqlite.prepare('UPDATE library_watches SET seat_policy=NULL').run();
+  await observe(2,30_000);
+  expect(watch()).toMatchObject({seat_policy:LIBRARY_SEAT_POLICY,event_id:null});
+  expect(deliveries()).toEqual([before]);
+  expect(await libraryDeliveryCurrent(db.env,'111',channel,event)).toBe(false);
+ });
  it('starts silently again on the next KST day',async()=>{
   configure();await observe(0);
-  vi.setSystemTime(Date.parse('2026-10-17T00:00:00Z'));await observe(4);
+  vi.setSystemTime(Date.parse('2026-10-17T01:00:00Z'));await observe(4);
   expect(watch()).toMatchObject({day:'2026-10-17',remaining:4,event_id:null});expect(count('deliveries')).toBe(0);
  });
  it.each([180_000,240_000])('silently resets after an observation gap of %sms',async gap=>{
@@ -109,9 +126,9 @@ describe('library availability transitions with real SQLite',()=>{
   db.sqlite.exec('DROP TRIGGER fail_library_job');await observe(1);
   expect(count('deliveries')).toBe(1);expect(watch().remaining).toBe(1);
  });
- it('caps late-evening intent expiry at 21:00 KST',async()=>{
-  configure();vi.setSystemTime(Date.parse('2026-10-16T11:58:30Z'));await observe(0);await observe(1,60_000);
-  expect(deliveries()[0].expires_at).toBe('2026-10-16T12:00:00.000Z');
+ it('caps late-evening intent expiry at 22:00 KST',async()=>{
+  configure();vi.setSystemTime(Date.parse('2026-10-16T12:58:30Z'));await observe(0);await observe(1,60_000);
+  expect(deliveries()[0].expires_at).toBe('2026-10-16T13:00:00.000Z');
  });
 });
 
@@ -123,6 +140,14 @@ describe('library delivery eligibility and ordinary durable sends',()=>{
   expect(await libraryDeliveryCurrent(db.env,'111',channel,null)).toBe(false);
   expect(await libraryDeliveryCurrent(db.env,'111',channel,'other')).toBe(false);
  });
+ it.each([null,'unknown-policy'])('rejects a queued old-policy alert (%s) before any POST',async policy=>{
+  configure();const event=await opening();
+  db.sqlite.prepare('UPDATE library_watches SET seat_policy=?').run(policy);
+  expect(await libraryDeliveryCurrent(db.env,'111',channel,event)).toBe(false);
+  const api=vi.spyOn(globalThis,'fetch');await executeJob(db.env,deliveryJob(event));
+  expect(api).not.toHaveBeenCalled();
+  expect(db.sqlite.prepare('SELECT state FROM deliveries WHERE id=?').get(event)!.state).toBe('expired');
+ });
  it('invalidates old-cycle intents even if a later cycle is available',async()=>{
   configure();const first=await opening();await observe(0,30_000);await observe(1,30_000);const second=String(watch().event_id);
   expect(await libraryDeliveryCurrent(db.env,'111',channel,first)).toBe(false);
@@ -133,7 +158,7 @@ describe('library delivery eligibility and ordinary durable sends',()=>{
   if(reason==='full')await observe(0,30_000);
   if(reason==='channel')configure('111','1002');
   if(reason==='stale')tick(120_001);
-  if(reason==='outside')vi.setSystemTime(Date.parse('2026-10-16T12:00:00Z'));
+  if(reason==='outside')vi.setSystemTime(Date.parse('2026-10-16T13:00:00Z'));
   if(reason==='nextDay')vi.setSystemTime(Date.parse('2026-10-17T01:00:00Z'));
   expect(await libraryDeliveryCurrent(db.env,'111',channel,event)).toBe(false);
   const api=vi.spyOn(globalThis,'fetch');await executeJob(db.env,deliveryJob(event));
@@ -153,7 +178,9 @@ describe('library delivery eligibility and ordinary durable sends',()=>{
   await consume(db.env,{messages:[msg]} as unknown as MessageBatch<{id:string}>);
   expect(api).toHaveBeenCalledTimes(1);expect(api.mock.calls[0][0]).toBe(`https://discord.com/api/v10/channels/${channel}/messages`);
   const body=JSON.parse(api.mock.calls[0][1]!.body as string);
-  expect(body).toMatchObject({allowed_mentions:{parse:[]}});expect(body.content).toContain('잔여 2석 / 전체 102석');
+  expect(body).toMatchObject({allowed_mentions:{parse:[]}});expect(body.content).toContain('알림 대상 96석 중 잔여 2석');
+  expect(body.content).toContain('장애인석 1·3·44·85번과 리클라이너석 101·102번은 제외했습니다.');
+  expect(body.content).toContain('roomview5.asp?room_no=5');
   expect(db.sqlite.prepare('SELECT state,message_id FROM deliveries WHERE id=?').get(event)).toMatchObject({state:'sent',message_id:'98765'});
   expect(deliveryJob(event).state).toBe('done');
  });
@@ -182,17 +209,17 @@ describe('library delivery eligibility and ordinary durable sends',()=>{
 });
 
 describe('library poll scheduling and health',()=>{
- it.each(['2026-10-15T23:59:59Z','2026-10-16T12:00:00Z'])('excludes %s from the daytime window',time=>{
+ it.each(['2026-10-16T00:59:59Z','2026-10-16T13:00:00Z'])('excludes %s from the daytime window',time=>{
   expect(libraryWindow(Date.parse(time))).toBe(false);
  });
- it.each(['2026-10-16T00:00:00Z','2026-10-16T11:59:59Z'])('includes %s in the daytime window',time=>{
+ it.each(['2026-10-16T01:00:00Z','2026-10-16T12:59:59Z'])('includes %s in the daytime window',time=>{
   expect(libraryWindow(Date.parse(time))).toBe(true);
  });
  it.each(['unconfigured','disallowed','outside','staleTick','futureTick','outsideTick'] as const)('does no source work for %s',async reason=>{
   const fetcher=vi.spyOn(source,'fetchLibrarySnapshot');
   if(reason==='disallowed')configure('333');else if(reason!=='unconfigured')configure();
-  if(reason==='outside')vi.setSystemTime(Date.parse('2026-10-16T12:00:00Z'));
-  const scheduled=reason==='staleTick'?Date.now()-60_001:reason==='futureTick'?Date.now()+60_001:reason==='outsideTick'?Date.parse('2026-10-16T12:00:00Z'):Date.now();
+  if(reason==='outside')vi.setSystemTime(Date.parse('2026-10-16T13:00:00Z'));
+  const scheduled=reason==='staleTick'?Date.now()-60_001:reason==='futureTick'?Date.now()+60_001:reason==='outsideTick'?Date.parse('2026-10-16T13:00:00Z'):Date.now();
   await pollLibrary(db.env,scheduled);
   expect(fetcher).not.toHaveBeenCalled();expect(count('jobs')).toBe(0);expect(count('library_watches')).toBe(0);
   expect(db.sqlite.prepare("SELECT * FROM health WHERE id='library'").get()).toBeUndefined();
@@ -232,6 +259,12 @@ describe('library poll scheduling and health',()=>{
   await worker.scheduled({cron:LIBRARY_CRON,scheduledTime:Date.now()} as ScheduledController,db.env);
   expect(fetcher).not.toHaveBeenCalled();expect(count('jobs')).toBe(0);
   expect(db.sqlite.prepare("SELECT * FROM health WHERE id='cron'").get()).toBeUndefined();
+ });
+ it('ignores retired library Cron ticks during trigger propagation',async()=>{
+  configure();const fetcher=vi.spyOn(source,'fetchLibrarySnapshot');
+  await worker.scheduled({cron:'* 0-11 * * *',scheduledTime:Date.now()} as ScheduledController,db.env);
+  expect(fetcher).not.toHaveBeenCalled();expect(count('jobs')).toBe(0);
+  expect(db.sqlite.prepare('SELECT * FROM health').all()).toEqual([]);
  });
  it('preserves ordinary quarter-hour planning and does not fetch library data on that event',async()=>{
   configure();db.env.NOTICE_COLLECTION_MODE='external';const fetcher=vi.spyOn(source,'fetchLibrarySnapshot');
