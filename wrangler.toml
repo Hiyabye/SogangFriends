@@ -11,7 +11,7 @@ DISCORD_APPLICATION_ID = "1558118082914943086"
 DISCORD_PUBLIC_KEY = "f436edec4bca28b9491464c4b84525f1596d5f37d73394aad5c3043f965414c4"
 ALLOWED_GUILDS = "1558118900347183374"
 SOURCE_INTERVAL_HOURS = "6"
-# Eleven-board Node collector supplies authenticated snapshots; Worker Cron remains for meals/schedules.
+# Node collector supplies authenticated notice snapshots; Worker Cron remains for meals/schedules.
 NOTICE_COLLECTION_MODE = "external"
 # Apply D1 archive migrations 0003 + 0004 before separately approved activation.
 NOTICE_ARCHIVE_ENABLED = "true"
