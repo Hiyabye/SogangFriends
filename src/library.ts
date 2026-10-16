@@ -58,6 +58,57 @@ export async function libraryDeliveryCurrent(env:Env,guild:string,channel:string
  return !!row&&row.seat_policy===LIBRARY_SEAT_POLICY&&row.day===todayKst()&&row.remaining>0&&now-Date.parse(row.source_at)<=FRESH_MS&&now-Date.parse(row.observed_at)<=FRESH_MS;
 }
 
+/** Commit confirmed POST tracking and cleanup intent together, before any DELETE. */
+export async function recordLibraryMessage(env:Env,guild:string,channel:string,messageId:string,deliveryId:string):Promise<void> {
+ if(![guild,channel,messageId].every(value=>/^\d+$/.test(value))||!deliveryId.startsWith(`library:${guild}:`))throw new Error('Invalid library delivery identity');
+ const at=nowIso();
+ // Gate every statement on the still-sending delivery. Repeated completion cannot adopt an
+ // older message after a subsequent alert has already replaced it.
+ const results=await env.DB.batch([
+  env.DB.prepare(`INSERT OR IGNORE INTO jobs(id,kind,payload,created_at,available_at)
+   SELECT 'library-cleanup:'||m.guild_id||':'||m.channel_id||':'||m.message_id,'library-cleanup',
+    json_object('guild',m.guild_id,'channel',m.channel_id,'messageId',m.message_id,'replacementId',?),?,?
+   FROM library_messages m JOIN deliveries d ON d.guild_id=m.guild_id AND d.channel_id=m.channel_id
+   WHERE d.id=? AND d.guild_id=? AND d.channel_id=? AND d.state='sending' AND m.message_id!=?`)
+   .bind(messageId,at,at,deliveryId,guild,channel,messageId),
+  env.DB.prepare(`INSERT INTO library_messages(guild_id,channel_id,message_id,updated_at)
+   SELECT guild_id,channel_id,?,? FROM deliveries WHERE id=? AND guild_id=? AND channel_id=? AND state='sending'
+   ON CONFLICT(guild_id,channel_id) DO UPDATE SET message_id=excluded.message_id,updated_at=excluded.updated_at`)
+   .bind(messageId,at,deliveryId,guild,channel),
+  env.DB.prepare("UPDATE deliveries SET state='sent',message_id=?,updated_at=?,error=NULL WHERE id=? AND guild_id=? AND channel_id=? AND state='sending'")
+   .bind(messageId,at,deliveryId,guild,channel),
+ ]);
+ if(results[2].meta.changes===0){
+  const confirmed=await env.DB.prepare("SELECT id FROM deliveries WHERE id=? AND guild_id=? AND channel_id=? AND state='sent' AND message_id=?")
+   .bind(deliveryId,guild,channel,messageId).first();
+  if(!confirmed)throw new Error('Library completion has no sending delivery');
+ }
+}
+
+/** Durable post-success cleanup only; a DELETE failure never creates another POST. */
+export async function cleanupLibraryMessage(env:Env,payload:{guild:string;channel:string;messageId:string;replacementId:string}):Promise<void> {
+ const {guild,channel,messageId,replacementId}=payload;
+ if(![guild,channel,messageId,replacementId].every(value=>typeof value==='string'&&/^\d+$/.test(value))||messageId===replacementId)throw new Error('Invalid library cleanup identity');
+ if(!allowedGuild(guild,env))return;
+ const current=await env.DB.prepare('SELECT message_id FROM library_messages WHERE guild_id=? AND channel_id=?').bind(guild,channel).first<{message_id:string}>();
+ if(!current||current.message_id===messageId)throw new Error('Library cleanup has no replacement tracking');
+ // A later replacement is fine, but the replacement that authorized this deletion must
+ // still have confirmed send proof. Never treat an uncertain POST as deletion permission.
+ const replacement=await env.DB.prepare("SELECT id FROM deliveries WHERE id LIKE 'library:%' AND guild_id=? AND channel_id=? AND state='sent' AND message_id=?")
+  .bind(guild,channel,replacementId).first();
+ if(!replacement)throw new Error('Library cleanup has no confirmed replacement');
+ if(!env.DISCORD_TOKEN)throw new Error('Library cleanup token unavailable');
+ const response=await fetch(`https://discord.com/api/v10/channels/${channel}/messages/${messageId}`,{method:'DELETE',headers:{Authorization:`Bot ${env.DISCORD_TOKEN}`},signal:AbortSignal.timeout(15000)});
+ if(response.ok)return;
+ if(response.status===404){try{if((await response.json() as {code?:unknown}).code===10008)return;}catch{/* Only exact Unknown Message is deletion proof. */}}
+ if(response.status===429){
+  let seconds=60;
+  try{const data=await response.json() as {retry_after?:unknown};if(typeof data.retry_after==='number'&&Number.isFinite(data.retry_after))seconds=Math.min(86400,Math.max(1,Math.ceil(data.retry_after)));}catch{/* Retry with the default cooldown. */}
+  throw Object.assign(new Error('Library cleanup rate limited'),{retryAfter:seconds});
+ }
+ throw new Error('Library cleanup failed');
+}
+
 /** A single bounded read per tick, shared by all guilds. No per-minute job-history rows. */
 export async function pollLibrary(env:Env,scheduledTime:number):Promise<void> {
  if(!libraryWindow()||!libraryWindow(scheduledTime)||Math.abs(Date.now()-scheduledTime)>60_000||!(await recipients(env)).length)return;

@@ -7,7 +7,7 @@ import {batchNoticeCards,noticeCardMessage} from './notice-card';
 import { addDays, todayKst, validDate } from './time';
 import {boardHash,cleanupMealMessage,updateBoard} from './message-board';
 import {mealCard} from './meal-card';
-import {libraryDeliveryCurrent} from './library.ts';
+import {cleanupLibraryMessage,libraryDeliveryCurrent,recordLibraryMessage} from './library.ts';
 import { validateSchedules } from './schedule';
 import { updateScheduleSummary } from './schedule-summary';
 import { claim, deliveryIntent, deliveryIntentStatements, dispatch, enqueue, nowIso, recover, retryJob, saveNotices, sourceFailure } from './storage';
@@ -213,6 +213,10 @@ export async function executeJob(env:Env,job:Job) {
  for(const g of await recipients(env,'meals_channel'))await enqueue(env,`meal-board:${job.id}:${g.id}:${g.channel}`,'meal-board',{guild:g.id,channel:g.channel,date:payload.date,allowCreate:false});
  break;
  }
+ case 'library-cleanup': {
+ await cleanupLibraryMessage(env,payload);
+ break;
+ }
  case 'meal-cleanup': {
  await cleanupMealMessage(env,payload);
  break;
@@ -262,7 +266,12 @@ export async function executeJob(env:Env,job:Job) {
  await env.DB.prepare("UPDATE deliveries SET state='expired',updated_at=? WHERE id=? AND state='sending'").bind(nowIso(),payload.deliveryId).run();break;
  }
  const result=await discordSend(env,row.channel_id,content);
- await env.DB.prepare('UPDATE deliveries SET state=?,message_id=?,updated_at=?,error=? WHERE id=?').bind(result.state,result.messageId??null,nowIso(),result.state==='sent'?null:result.state,payload.deliveryId).run();
+ if(result.state==='sent'&&Object.hasOwn(payload,'libraryEvent')){
+  if(!result.messageId)throw new Error('Library send missing confirmed message ID');
+  await recordLibraryMessage(env,row.guild_id,row.channel_id,result.messageId,payload.deliveryId);
+ }else{
+  await env.DB.prepare('UPDATE deliveries SET state=?,message_id=?,updated_at=?,error=? WHERE id=?').bind(result.state,result.messageId??null,nowIso(),result.state==='sent'?null:result.state,payload.deliveryId).run();
+ }
  if(result.state==='retry') {const error=new Error('Discord rate limited') as Error&{retryAfter:number};error.retryAfter=result.retryAfter??60;throw error;}
  break;
  }
