@@ -1,16 +1,21 @@
 # Queue dispatch and board planning
 
-## Local change — not deployed
+## Approved deployment — 2026-10-16 KST
 
-Migration `0017_job_dispatch_lease.sql` adds nullable `jobs.dispatch_until`.
-Production remains on migrations0001–0016 until a separately approved rollout.
-Apply0017 **before** deploying the new Worker: dispatch, execution claims and
-retry updates require the column. Existing explicit-column inserts and the old
-Worker remain compatible with the additive column. No baselines, job history,
-destinations or Discord messages need resetting or replaying.
+Migration `0017_job_dispatch_lease.sql` adds nullable `jobs.dispatch_until` and was
+applied before deploying Worker `a78d19fc-2a5c-4c34-8019-72291f476e91` from
+`5a93604`. Production has migrations0001–0017, with none pending. Future rollouts
+still need approval. Dispatch, execution claims and retry updates require this
+column; old explicit-column inserts remain compatible with the additive column.
+No baselines, job history, destinations or Discord messages were reset or replayed.
 
-Local fixture tests apply all migrations to real SQLite. Bundle dry-run is not
-remote D1/Queue verification. Actual quota savings require post-rollout analytics.
+Local fixture tests apply all migrations to real SQLite. The automatic23:45 KST
+Cron created direct board jobs and persisted a dispatch reservation, but Queue
+send failed because the existing daily free-tier allowance was exhausted. This
+verifies production planning/reservation, not successful Queue consumption or
+quota savings. See [rollout evidence](VERIFICATION.md#2026-10-16--queue-dispatch-optimization-rollout).
+Actual savings and successful automatic recovery still require observations after
+the quota resets; no paid upgrade or test messages were issued.
 
 ## Dispatch reservation versus execution lease
 
