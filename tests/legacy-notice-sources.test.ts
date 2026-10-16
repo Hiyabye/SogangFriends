@@ -56,6 +56,19 @@ describe('additional official notice boards',()=>{
   expect(()=>parseNoticeRaw(html.replace('2026.10.09','2026.10.08'),n)).toThrow('date');
   expect(()=>parseNoticeRaw(html,{...n,url:n.url+'&extra=1'})).toThrow('URL');
  });
+ it.each(ADDITIONAL_NOTICE_SOURCES.filter(s=>s.kind==='cms'))('preserves nested pasted CMS bodies for $id without accepting ambiguous structural bodies',s=>{
+  const notice=parseNoticePage(page(s),s,1).notices.find(n=>n.id==='900')!;
+  const nested='<div class="post_cont"><p data-original="yes">Pasted &amp; content</p><img src="/images/nested.png"><a href="/nested.pdf">file</a></div>';
+  const html=detail(s).replace('<p data-original="yes">Body &amp; content</p>',nested);
+  const raw=parseNoticeRaw(html,notice);
+  expect(raw.bodyHtml).toBe(nested+'<img src="/images/example.png"><a href="/file.pdf">file</a>');
+  expect(raw.imageUrls).toEqual(['/images/nested.png','/images/example.png'].map(path=>new URL(path,s.url).href));
+  expect(raw.attachments).toContain(new URL('/nested.pdf',s.url).href);
+  expect(()=>parseNoticeRaw(html.replace('<div class="post_file">','<div class="post_cont">second body</div><div class="post_file">'),notice)).toThrow('Unexpected legacy notice structure');
+  expect(()=>parseNoticeRaw(html.replace('value="900"','value="901"'),notice)).toThrow('board/post');
+  expect(()=>parseNoticeRaw(html.replace('Notice 900','Changed title'),notice)).toThrow('title');
+  expect(()=>parseNoticeRaw(html.replace('2026.10.09','2026.10.08'),notice)).toThrow('date');
+ });
  it('proves photo-board page coverage using its total and rejects another board or layout',()=>{
   const s=ADDITIONAL_NOTICE_SOURCES.find(s=>s.id==='bdataNews')!;
   const html=page(s,1,2,10).replace('</tbody>','<tr><td><div class="item"></div></td></tr></tbody>');

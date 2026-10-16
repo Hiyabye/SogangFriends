@@ -1,4 +1,4 @@
-import {parse,type DefaultTreeAdapterMap} from 'parse5';
+import {parse,parseFragment,type DefaultTreeAdapterMap} from 'parse5';
 import type {Notice,Source} from './types';
 import {validDate} from './time.ts';
 
@@ -66,16 +66,21 @@ export function parseBusinessNoticeRaw(input:string,source:Source,notice:Notice)
  if(notice.source!==source.id||notice.url!==businessDetailUrl(source,notice.id))throw new Error('Wrong business archive identity');
  const doc=parse(input,{sourceCodeLocationInfo:true});documentIdentity(doc,notice.url);const board=one(doc,n=>cls(n,'board-view'));
  formIdentity(one(board,n=>tag(n,'form')&&attr(n,'name')==='listForm'));
- if(attr(one(board,n=>tag(n,'input')&&attr(n,'id')==='artclViewTitle'),'value')!==notice.title)throw new Error('Changed business notice title');
+ const encodedTitle=attr(one(board,n=>tag(n,'input')&&attr(n,'id')==='artclViewTitle'),'value');
+ // K2Web escapes entity text again in this attribute, while its list cuts the
+ // encoded title at 100 characters (even mid-entity). Keep the full heading check.
+ const decodeTitle=(value:string)=>text(parseFragment(value.replaceAll('<','&lt;')));
+ const fullTitle=decodeTitle(encodedTitle);
+ if(notice.title!==fullTitle&&(encodedTitle.length<=100||notice.title!==decodeTitle(encodedTitle.slice(0,100))))throw new Error('Changed business notice title');
  const content=one(board,n=>cls(n,'viewCont')),heading=one(content,n=>cls(n,'title'));
- // The visible heading optionally adds a category; the hidden title is unprefixed.
- const visible=text(one(heading,n=>tag(n,'strong')));if(visible!==notice.title&&visible.replace(/^\[[^\[\]]+\] /,'')!==notice.title)throw new Error('Changed business visible title');
+ const visible=text(one(heading,n=>tag(n,'strong')));if(visible!==fullTitle&&visible.replace(/^\[[^\[\]]+\] /,'')!==fullTitle)throw new Error('Changed business visible title');
  const dateRow=one(one(heading,n=>cls(n,'detail')),n=>tag(n,'li')&&all(n,x=>tag(x,'span')&&text(x)==='작성일').length===1);
  const stamp=text(dateRow).match(/^작성일 (\d{4}\.\d{2}\.\d{2})$/);if(!stamp||date(stamp[1])!==notice.published)throw new Error('Changed business notice date');
  const body=one(content,n=>cls(n,'txt')),loc='tagName'in body?body.sourceCodeLocation:null;if(!loc?.startTag||!loc.endTag)throw new Error('Missing original business body offsets');
  const bodyHtml=input.slice(loc.startTag.endOffset,loc.endTag.startOffset),bodyDoc=parse(bodyHtml),attachments:string[]=[];
  const files=all(content,n=>cls(n,'attachment'));if(files.length>1)throw new Error('Ambiguous business attachments');
- if(files.length){const links=all(files[0],n=>tag(n,'a'));if(!links.length)throw new Error('Unresolved business attachments');for(const a of links){const url=reference(attr(a,'href'),notice.url);if(!/^https:\/\/sbs\.sogang\.ac\.kr\/bbs\/sbs\/649\/[1-9]\d*\/download\.do$/.test(url))throw new Error('Wrong business attachment identity');attachments.push(url);}}
+ if(files.length){const links=all(files[0],n=>tag(n,'a')),empty=all(files[0],n=>tag(n,'span')&&cls(n,'no-file'));
+  if(links.length?empty.length!==0:empty.length!==1||text(files[0])!=='첨부파일이(가) 없습니다.')throw new Error('Unresolved business attachments');for(const a of links){const url=reference(attr(a,'href'),notice.url);if(!/^https:\/\/sbs\.sogang\.ac\.kr\/bbs\/sbs\/649\/[1-9]\d*\/download\.do$/.test(url))throw new Error('Wrong business attachment identity');attachments.push(url);}}
  for(const a of all(bodyDoc,n=>tag(n,'a')&&!!attr(n,'href'))){if(('attrs'in a&&a.attrs.some(x=>x.name==='download'))||/\.(?:pdf|hwp|hwpx|docx?|xlsx?|pptx?|zip|jpe?g|png|gif)(?:[?#]|$)/i.test(attr(a,'href')))attachments.push(reference(attr(a,'href'),notice.url));}
  const imageUrls=all(bodyDoc,n=>tag(n,'img')&&!!attr(n,'src')&&!/^(?:data|file):/i.test(attr(n,'src').trim())).map(n=>reference(attr(n,'src'),notice.url));
  return {bodyHtml,attachments:[...new Set(attachments)],imageUrls:[...new Set(imageUrls)]};

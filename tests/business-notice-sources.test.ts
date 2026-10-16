@@ -92,9 +92,23 @@ describe('business official K2Web board',()=>{
    expect(db.sqlite.prepare("SELECT * FROM sources WHERE id='university'").get()).toEqual(before);
   }finally{db.close();}
  });
+ it('validates double-escaped detail titles and the exact encoded 100-character list preview',()=>{
+  const original=parseBusinessNoticePage(page(),source).notices[0];
+  for(const encoded of ['A &quot;quoted&quot; title','A &apos;quoted&apos; title','A &lt;literal&gt; title','x'.repeat(97)+'&apos;end&apos;']){
+   const full=encoded.replaceAll('&quot;','"').replaceAll('&apos;',"'").replaceAll('&lt;','<').replaceAll('&gt;','>');
+   const preview=encoded.slice(0,100).replaceAll('&quot;','"').replaceAll('&apos;',"'").replaceAll('&lt;','<').replaceAll('&gt;','>');
+   const html=detail().replace('value="Notice 900 &amp; details"',`value="${encoded.replaceAll('&','&amp;')}"`).replace('[학사] Notice 900 &amp; details',`[학사] ${encoded}`);
+   for(const title of new Set([full,preview]))expect(parseBusinessNoticeRaw(html,source,{...original,title}).bodyHtml).toBe(body);
+   for(const title of [preview.slice(0,-1),preview+'x','Different'])expect(()=>parseBusinessNoticeRaw(html,source,{...original,title})).toThrow('Changed business notice title');
+   expect(()=>parseBusinessNoticeRaw(html.replace(`[학사] ${encoded}`,'[학사] Changed heading'),source,{...original,title:preview})).toThrow('Changed business visible title');
+  }
+ });
  it('keeps exact original HTML and exports only proven attachment and web-image references',()=>{
   const notice=parseBusinessNoticePage(page(),source).notices[0],html=detail(),raw=parseBusinessNoticeRaw(html,source,notice);
   expect(parseBusinessNoticeRaw(html.replace('<strong>[학사] Notice 900','<strong>Notice 900').replace(/<div class="attachment">.*?<\/div>/,''),source,notice).attachments).toEqual([new URL('../file.pdf',notice.url).href]);
+  const empty=html.replace(/<div class="attachment">.*?<\/div>/,'<div class="attachment"><span class="no-file">첨부파일이(가) 없습니다.</span></div>');
+  expect(parseBusinessNoticeRaw(empty,source,notice).attachments).toEqual([new URL('../file.pdf',notice.url).href]);
+  for(const invalid of [empty.replace('첨부파일이(가) 없습니다.','unknown'),empty.replace('class="no-file"','class="other"'),empty.replace('<span class="no-file">','<a href="/bbs/sbs/649/105030/download.do">file</a><span class="no-file">'),html.replace(/<ul><li><a href="\/bbs\/sbs\/649\/105030\/download.do">file.pdf<\/a><\/li><\/ul>/,'')])expect(()=>parseBusinessNoticeRaw(invalid,source,notice)).toThrow('Unresolved business attachments');
   expect(raw.bodyHtml).toBe(body);expect(raw.imageUrls).toEqual(['https://sbs.sogang.ac.kr/images/a.png']);expect(raw.attachments).toEqual(['https://sbs.sogang.ac.kr/bbs/sbs/649/105030/download.do',new URL('../file.pdf',notice.url).href]);
   for(const changed of [html.replace('/900/artclView.do','/901/artclView.do'),html.replace('value="Notice 900','value="Changed'),html.replace('[학사] Notice 900','[학사] Changed'),html.replace('2026.10.14','2026.10.13'),html.replace('/bbs/sbs/649/artclList.do','/bbs/sbs/650/artclList.do'),html.replace('/649/105030/download.do','/650/105030/download.do'),html.replace('/bbs/sbs/649/105030/download.do','https://attacker.test/bbs/sbs/649/105030/download.do'),html.replace('src="/images/a.png"','src="javascript:bad"')])expect(()=>parseBusinessNoticeRaw(changed,source,notice)).toThrow();
   expect(()=>parseBusinessNoticeRaw(html,source,{...notice,url:notice.url+'?page=1'})).toThrow();

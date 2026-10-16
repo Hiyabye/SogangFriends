@@ -97,7 +97,8 @@ export function parseLegacyNoticeRaw(input:string,source:Source,notice:Notice):{
  if(text(heading)!==notice.title)throw new Error('Changed legacy notice title');
  const observed=cms?all(one(one(article,n=>cls(n,'post_info')),n=>cls(n,'info')),n=>tag(n,'span')).map(text).filter(v=>/^\d{4}\.\d{2}\.\d{2} /.test(v)).map(v=>v.slice(0,10)):all(article,n=>cls(n,'unit')&&all(n,x=>cls(x,'label')&&text(x)==='작성일').length===1).map(n=>text(one(n,x=>cls(x,'value'))));
  if(observed.length!==1||date(observed[0])!==notice.published)throw new Error('Changed legacy notice date');
- const body=one(article,n=>cls(n,cms?'post_cont':'substance'));const loc='tagName'in body?body.sourceCodeLocation:null;if(!loc?.startTag||!loc.endTag)throw new Error('Missing original legacy body offsets');
+ // Pasted CMS content can itself contain .post_cont; only the wrapper's body is structural.
+ const body=one(article,n=>cls(n,cms?'post_cont':'substance')&&(!cms||('parentNode'in n&&n.parentNode===article)));const loc='tagName'in body?body.sourceCodeLocation:null;if(!loc?.startTag||!loc.endTag)throw new Error('Missing original legacy body offsets');
  const bodyHtml=input.slice(loc.startTag.endOffset,loc.endTag.startOffset);
  const resolve=(v:string)=>{const u=new URL(v,notice.url);if(!['http:','https:'].includes(u.protocol)||u.username||u.password)throw new Error('Invalid legacy archive reference');return u.href;};
  // Official CMS/WebSTYLIST attachment links use /Download, not file extensions.
