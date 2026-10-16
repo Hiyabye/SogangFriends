@@ -1,7 +1,7 @@
 # Library seat availability alerts
 
 Status: released with explicit user approval on2026-10-16 KST.
-Current Worker `4030f135-2b8d-470a-8bec-e962d250b502` from `3ede134`: six-seat exclusion policy, migration0014 and10:00–21:59 KST schedule deployed; command-description readback and push completed. Automatic21:31/21:32 checks confirmed eligible remaining0 and a silent new-policy baseline, without new delivery intents. Initial aggregate rollout (`f3250fd2-30da-4099-8c72-4be25d865383` from `96e5148`) independently verified automatic collection, a silent baseline, one natural outbox/Queue alert and a separate no-mention channel test. That earlier alert does not prove filtered-alert delivery.
+Current latest-only Worker `029641b6-8fc3-4bff-9853-9b5a9dba5c2c` from `faa102a`, migration0015. Genuine latest alert is tracked; the prior alert was deleted by a completed cleanup job with Discord readback. No synthetic alerts. Earlier filtered Worker `4030f135-2b8d-470a-8bec-e962d250b502` from `3ede134`: six-seat exclusion policy, migration0014 and10:00–21:59 KST schedule deployed; command-description readback and push completed. Automatic21:31/21:32 checks confirmed eligible remaining0 and a silent new-policy baseline, without new delivery intents. Initial aggregate rollout (`f3250fd2-30da-4099-8c72-4be25d865383` from `96e5148`) independently verified automatic collection, a silent baseline, one natural outbox/Queue alert and a separate no-mention channel test. That earlier alert does not prove filtered-alert delivery.
 
 ## Confirmed product decisions
 
@@ -46,6 +46,14 @@ User approved implementation, tests, additive policy migration, deployment, push
 - Cron becomes`* 1-12 * * *` UTC; expiry cutoff becomes22:00 KST. Ignore the retired Cron expression during propagation so ordinary jobs are not accelerated.
 - Render eligible96-seat availability, explicit exclusions and a link directly to the seat map. No dependencies or extra per-minute requests.
 - Local full check passed:578 Vitest tests/30 files, TypeScript and14 Node OCR-client tests. Bundle dry-run and independent review passed. Only0014 was pending remotely; applied it before deployment at21:19:55 KST. No migrations remain pending. Updated the existing five guild commands and read back the10–22 description; no channel settings were changed. Push CI38899803369 passed. A one-request isolated remote preview validated the live detail parser (eligible96, used95, remaining1). Automatic production21:31/21:32 checks succeeded, stored eligible remaining0/current policy and silently cleared the old event. No new intent/send was created; ordinary quarter-hour health remained good. See verification history. Natural filtered-alert delivery and live10:00/22:00 boundaries remain unverified.
+
+## Approved latest-only follow-up — 2026-10-16
+
+- User chose deletion of the known connection test/old alert now, and confirmed successful replacement first, deletion second; explicitly approved implementation, tests, additive migration, deployment and push with no test alerts.
+- Migration0015 adds per-guild/channel `library_messages`. Confirmed POST completion atomically records latest ID, delivery proof and a deterministic cleanup job for the old ID. Deletion is independent; network/Discord failures retry DELETE only, with the existing three-claim limit. Latest tracking and confirmed replacement proof guard deletion. Unknown send/storage outcomes preserve old messages and cannot automatically repost.
+- TypeScript,612 Vitest tests,14 OCR-client tests and Worker bundle dry-run passed. Independent review found no code defect; identified and reconciled old-version alerts during handoff.
+- Deployed at21:44:42 KST, migration listing clear and push CI38902700037 passed. Deleted known test/aggregate IDs with exact10008 readback. Verified21:34/21:43 real filtered alerts, tracked latest1560634291338350753 and queued cleanup for1560632025730388001; the job completed in one claim. Discord readback confirmed older messages absent and latest retained without mentions. Historical deliveries/jobs and routes were not rewritten.
+- This proves live cleanup on genuine existing alert messages, not a new-version automatic POST→track→cleanup cycle. That cycle remains fixture-tested pending the next natural opening;10:00/22:00 live boundaries also remain unobserved.
 
 ## Implemented boundaries
 
