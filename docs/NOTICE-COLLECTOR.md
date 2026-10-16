@@ -2,7 +2,7 @@
 
 ## Scope and current operation
 
-The project-owned Node/GitHub Actions collector uses the shared `src/sources.ts` catalog and parsers. Production supports eighteen official boards. The seven additions were deployed to the Worker before the updated collector was pushed, with approval on2026-10-16 KST; their initial live baselines remain unverified. Four Engineering boards are additional local-only work, bringing the local catalog to22; they are not deployed or collecting in production:
+The project-owned Node/GitHub Actions collector uses the shared `src/sources.ts` catalog and parsers. Production supports22 official boards across six institution routes. The Engineering expansion was activated with explicit approval on2026-10-16 KST; live collection run38893089176 completed all22 D1 snapshot jobs and established four silent Engineering baselines:
 
 | Source ID | Official page |
 |---|---|
@@ -24,12 +24,12 @@ The project-owned Node/GitHub Actions collector uses the shared `src/sources.ts`
 | `conveduNews` | <https://convedu.sogang.ac.kr/front/cmsboardlist.do?siteId=convedu&bbsConfigFK=5550> |
 | `bdataNotice` | <https://sc.sogang.ac.kr/bdata/4305.html> |
 | `bdataNews` | <https://sc.sogang.ac.kr/bdata/4306.html> |
-| `engineeringNotice` (local only) | <https://eng.sogang.ac.kr/board/notice> |
-| `engineeringRecruit` (local only) | <https://eng.sogang.ac.kr/board/recruit> |
-| `engineeringAcademic` (local only) | <https://eng.sogang.ac.kr/board/academic> |
-| `engineeringResearch` (local only) | <https://eng.sogang.ac.kr/board/research> |
+| `engineeringNotice` | <https://eng.sogang.ac.kr/board/notice> |
+| `engineeringRecruit` | <https://eng.sogang.ac.kr/board/recruit> |
+| `engineeringAcademic` | <https://eng.sogang.ac.kr/board/academic> |
+| `engineeringResearch` | <https://eng.sogang.ac.kr/board/research> |
 
-The original eleven sources have initialized live baselines and stored production rows; five institution channels have confirmed manual Components V2 verification messages. A subsequent2026-10-14 live run verified one new `externalInfo` notice through ingestion, Queue processing, institution routing and Discord readback. This does not prove full history or every source/destination route. Current production includes the approved oversized-original change and migrations0009/0011; see [rollout evidence](VERIFICATION.md) and [archive limits](NOTICE-ARCHIVE.md#size-limits) for observed verification and remaining capacity limits.
+All22 sources have initialized live baselines and stored production rows. Five pre-Engineering institution channels have confirmed manual Components V2 verification messages; a2026-10-14 live run verified one new `externalInfo` notice through ingestion, Queue processing, routing and Discord readback. Engineering's first collection stored94 notices and94 originals without creating delivery intents, as required for a silent baseline. This does not prove full history or a new Engineering Discord delivery. Current production has migrations0001–0012; see [rollout evidence](VERIFICATION.md) and [archive limits](NOTICE-ARCHIVE.md#size-limits) for observed verification and remaining capacity limits.
 
 ```text
 Official sources → Node → HMAC /internal/notices → D1 snapshot job → Queue → Discord
@@ -38,21 +38,21 @@ Official sources → Node → HMAC /internal/notices → D1 snapshot job → Que
 
 The collector needs no Discord, model or Cloudflare account API token and sends no Discord messages directly. First successful collection establishes a silent baseline; stable official IDs suppress duplicate/reordered/pinned posts. Later title/link updates do not become new alerts. A source failure does not stop healthy sources, but makes the run fail. A raw-capture failure likewise reports failure without suppressing an otherwise valid recent snapshot.
 
-The six university lists use official JSON; the remaining local sources are HTML. Big-data wrappers `4305` and `4306` embed WebSTYLIST boards `bbsid=5256` (notices) and `bbsid=5255` (photo-style News); wrapper IDs are not article IDs. Photo News validates page counts against its advertised total rather than table-row ordinals. Recent polling is bounded to **50 rows per university board** and **three pages per HTML board** (15 regular rows/page for SW boards, 10 for the others), not full-history traversal.
+The six university lists use official JSON; the remaining sixteen sources are HTML. Big-data wrappers `4305` and `4306` embed WebSTYLIST boards `bbsid=5256` (notices) and `bbsid=5255` (photo-style News); wrapper IDs are not article IDs. Photo News validates page counts against its advertised total rather than table-row ordinals. Recent polling is bounded to **50 rows per university board** and **three pages per HTML board** (15 regular rows/page for SW boards, 10 for the others), not full-history traversal.
 
 Node uses one scoped, verified public intermediate to fix the official site's incomplete certificate chain. Never disable TLS or add unrelated trust material; see [certificate provenance](../certificates/README.md). There is no dependency on reference repositories' code, feeds or infrastructure.
 
-## Engineering expansion — local only
+## Engineering expansion — deployed
 
-The approved scope is the four public Engineering boards above, grouped under `engineering` (공과대학). Newsletter, Dean's List student rosters and separate department sites are not included. Intended destination: channel `1560465047128514640`; this is user-provided intent, not verified live configuration. No channel ID is hard-coded in source definitions.
+The approved scope is the four public Engineering boards above, grouped under `engineering` (공과대학). Newsletter, Dean's List student rosters and separate department sites are not included. Channel `1560465047128514640` in guild `1558118900347183374` passed ownership/type/effective View Channel and Send Messages validation and is configured in D1. No channel ID is hard-coded in source definitions.
 
 `src/engineering-notice-sources.ts` validates source-bound canonical URLs, board headings and active navigation. Lists have ten regular rows per page; pinned rows appear only on page1 and are included in the displayed total but excluded from regular ordinals. Pagination and contiguous ordinals must prove final-page coverage; empty/out-of-range responses reject rather than imply EOF. Details preserve exact inner HTML, compare visible publication dates with timestamp-derived KST dates, and extract proven attachment/image URLs without downloading binaries.
 
 Read-only native Node checks collected36/23/5/30 recent entries from General/Recruitment/Academic/Research respectively, parsed an original article from each, and verified final pages36/3/1/28. This establishes the observed markup contract, not full-history ingestion, capacity or Discord delivery.
 
-Local migration `0012_engineering_channel.sql` adds nullable `guilds.engineering_channel`; `/setup engineering` follows the existing institution validation and override/fallback rules. Omitted setup options remain unchanged. Existing baselines, last-good data, committed delivery plans and historical cursors must remain intact. Engineering's first successful collection must establish silent baselines, not send retained posts.
+Deployed migration `0012_engineering_channel.sql` adds nullable `guilds.engineering_channel`; registered `/setup engineering` follows the existing institution validation and override/fallback rules. A guarded D1 update changed only the Engineering destination and update timestamp; readback confirmed the five old institution routes, meal/schedule settings and NULL fallback unchanged. The initial live collection retained36/23/5/30 notices and originals for General/Recruitment/Academic/Research. All four sources are initialized with no errors; no Engineering delivery intents were created.
 
-This expansion differs from the earlier seven-board rollout: a sixth institution requires a schema addition and changed Discord command definitions. With explicit approval for each external operation, apply the additive migration **before** deploying Worker code that queries the column; update registered commands and validate/configure the Engineering channel; only then push the expanded collector. No migration application, deployment, command registration, channel configuration, push, workflow dispatch or historical traversal is authorized by approval of local implementation alone. New-source delivery remains unverified until an approved run is observed end to end.
+This expansion required schema and command-definition changes: migration0012 preceded Worker deployment, then guild command registration and channel validation/configuration preceded collector push. The five known guild commands were replaced and read back; the empty global scope was untouched. No historical backfill was started/dispatched. Future external changes require fresh approval. New Engineering Discord delivery and visual rendering remain unverified; silent baselines are not delivery proof.
 
 ## Deferred scope: Convergence Education subsidiary programs
 
@@ -74,7 +74,7 @@ No arguments also means dry-run. This performs **real read-only HTTPS requests**
 
 ## Upload configuration and approval
 
-Production is already configured; these are requirements for a new environment, not instructions to repeat activation. **Secret changes, Git push, deployment, workflow dispatch and uploads need approval.** Production Worker `46e9f550-86d7-4692-b14c-b6fc1771e9c3` was deployed from main `a87212a` on2026-10-16 KST, then the expanded collector was pushed, in the user-approved order. No migrations were pending or applied; previously approved0009/0011 remain applied. All18 boards are supported by deployed code, but the seven new baselines were absent at rollout readback and await collection. No collector workflow was manually dispatched. Future source expansions likewise require Worker deployment before collector push; no schema migration or command registration was needed for this expansion. Each new source establishes its own silent baseline without resetting the original sources or historical cursors. Starting historical traversal for the new sources remains a separately approved action. Future changes still require their own approval.
+Production is already configured; these are requirements for a new environment, not instructions to repeat activation. **Secret changes, Git push, deployment, workflow dispatch and uploads need approval.** Production Worker `9a0aafa2-0716-403b-8c84-8c642e0f3054` was deployed from main `802615b` on2026-10-16 KST after migration0012, then commands/channel configuration and collector push completed. No migrations remain pending (0001–0012 applied). Approved manual run38893089176 collected all22 boards; D1 readback confirmed completed snapshot jobs and four silent Engineering baselines. Future expansions likewise require compatible schema/Worker before collector push; a new institution route also needs command/channel configuration. Preserve existing baselines and historical cursors. Historical traversal was not started/dispatched during this rollout. Future changes still require their own approval.
 
 1. Configure the **same** dedicated `NOTICE_INGEST_SECRET` in Worker and Actions, privately. Keep the existing D1/Queue/baselines. Do not paste secrets into chat, Git, command arguments or logs.
 2. Deploy the approved Worker/schema with `NOTICE_COLLECTION_MODE=external`. Raw capture additionally requires its own matching schema and flag; follow [NOTICE-ARCHIVE.md](NOTICE-ARCHIVE.md).

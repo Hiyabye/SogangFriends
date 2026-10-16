@@ -20,8 +20,8 @@ Use **Node >=24**, npm and the committed `package-lock.json`. TypeScript runs in
 | HTTP signature verification, defer, commands | `src/worker.ts`, `src/discord.ts` |
 | Cron planning and Queue consumption | `src/jobs.ts` |
 | D1 claims, outbox, baselines and recovery | `src/storage.ts`, `migrations/` |
-| Official notice sources (18 deployed; four Engineering additions local only) | `src/sources.ts`, `src/university-notice-sources.ts`, `src/legacy-notice-sources.ts`, `src/engineering-notice-sources.ts` |
-| Institution routes (five deployed; Engineering sixth local only) | `src/notice-channels.ts` |
+| Twenty-two deployed official notice sources | `src/sources.ts`, `src/university-notice-sources.ts`, `src/legacy-notice-sources.ts`, `src/engineering-notice-sources.ts` |
+| Six institution routes | `src/notice-channels.ts` |
 | Snapshot HMAC ingress | `src/notice-ingest.ts` |
 | Raw archive, pagination and D1 limits | `src/notice-archive*.ts`, `scripts/notice-archive-client.mjs` |
 | Recent collection / historical traversal | `scripts/notice-collector.mjs`, `scripts/backfill-notices.mjs` |
@@ -72,7 +72,7 @@ git diff --check
 
 ## Notices
 
-The local catalog includes22 boards in six groups. Production remains at18 boards in five groups (expanded Worker deployed and collector pushed with approval on2026-10-16; new baselines await first successful collection). Engineering is approved for local implementation only:
+Production supports22 boards in six groups. The Engineering expansion was deployed and collected with explicit approval on2026-10-16 KST; all22 snapshot jobs completed and the four Engineering sources established silent baselines:
 
 | Setup group | Source IDs |
 |---|---|
@@ -81,11 +81,11 @@ The local catalog includes22 boards in six groups. Production remains at18 board
 | `swedu` | `sweduNotice`, `sweduNews`, `sweduPress` |
 | `convedu` | `conveduNotice`, `conveduNews` |
 | `bdata` | `bdataNotice`, `bdataNews` |
-| `engineering` (local only) | `engineeringNotice`, `engineeringRecruit`, `engineeringAcademic`, `engineeringResearch` |
+| `engineering` | `engineeringNotice`, `engineeringRecruit`, `engineeringAcademic`, `engineeringResearch` |
 
-- Engineering adds nullable `guilds.engineering_channel` in local migration0012 and `/setup engineering`. Intended channel is `1560465047128514640`, not a hard-coded runtime destination or verified live setting. Newsletter/Dean's List and individual department sites are out of scope. Apply the separately approved additive remote migration before the Worker that queries the new column; update command definitions and validate/configure the channel before collector push. Every external action still needs explicit approval. New sources establish silent baselines; do not replay old notices or start backfill automatically.
+- Engineering uses nullable `guilds.engineering_channel` (deployed migration0012) and registered `/setup engineering`. Channel `1560465047128514640` passed ownership/type/effective View Channel and Send Messages validation and is configured in D1, not hard-coded in source definitions. Newsletter/Dean's List and individual department sites are out of scope. Future new institution routes require additive schema before Worker deployment, then command/channel configuration before collector push. Every future external action still needs explicit approval; do not replay old notices or start backfill automatically.
 - Dedicated institution channel overrides `notices_channel`; never also send to fallback. With neither configured, skip that group. Group by destination **before** card batching, preserving existing delivery IDs/committed plans.
-- Current production uses all five institution channels with **NULL fallback**; the former combined channel was deleted. Do not restore it from historical verification records.
+- Current production uses all six institution channels with **NULL fallback**; the former combined channel was deleted. Do not restore it from historical verification records.
 - `legacy-notice-sources.ts` is **active** CMS/WebSTYLIST support, not dead bot code. The big-data wrapper ID is not its article ID. Keep canonical detail URL checks in ingestion.
 - `NOTICE_COLLECTION_MODE=external` must skip both new and previously queued direct collection jobs. Node supplements TLS with exactly the single pinned public intermediate; never disable verification or add unrelated trust material. Follow [certificate checks](certificates/README.md).
 - University board configs are source-bound:2/34/141/1/142/3; preserve existing `university` identity. Big-data News is photo board5255, not notice board5256. Convergence subsidiary-program notices are explicitly deferred; candidates and scope are recorded in [collector contract](docs/NOTICE-COLLECTOR.md#deferred-scope-convergence-education-subsidiary-programs).
@@ -135,8 +135,9 @@ The local catalog includes22 boards in six groups. Production remains at18 board
 
 ## Current deployment boundary — do not bypass
 
-- Verified production Worker: **`46e9f550-86d7-4692-b14c-b6fc1771e9c3`**, deployed from main **`a87212a`** on2026-10-16 KST with explicit approval, followed by collector push in that order. It supports18 notice boards; the seven new sources had no production baselines at rollout readback and await first successful collection. Existing five institution routes and NULL fallback were confirmed unchanged. Earlier archive-reference, temporary meal-image and meal-label fixes remain included. This rollout did not dispatch collection/backfill/OCR workflows or verify new-source delivery; see [verification history](docs/VERIFICATION.md).
-- Production has migrations**0001–0011**, including separately approved0009 and0011. No migrations remained pending after application. Existing original captures, notice baselines and guild routing were preserved.
+- Verified production Worker: **`9a0aafa2-0716-403b-8c84-8c642e0f3054`**, deployed from main **`802615b`** on2026-10-16 at approximately20:19 KST with explicit approval. Migration0012 preceded deployment; command registration and validated Engineering channel configuration preceded collector push. It supports22 notice boards/six routes. Existing five institution routes, meal/schedule settings and NULL fallback were confirmed unchanged. Earlier fixes, npm dependency updates (`8954f47`) and OCR highlight detection (`cc8e493`) are included; see [verification history](docs/VERIFICATION.md).
+- Production has migrations**0001–0012**; no migrations remain pending. Notice run38893089176 completed all22 D1 snapshot jobs. Engineering initialized four silent baselines and stored94 notices plus94 originals (36/23/5/30); no Engineering delivery intents were created. This does not verify a new Engineering Discord delivery or visual rendering. No historical backfill was started/dispatched.
+- OCR verification run38893092829 (`ingest=false`) accepted both retained sources with real native recognition; subsequent run38893503313 (`ingest=true`) accepted one uncached result and reused one exact cache match. Ingestion created no delivery jobs; this does not prove a new meal report was delivered. Push CI38893075857 passed. Node20-action/Ubuntu runner migration warnings were nonfatal and remain unchanged.
 - This was a scoped rollout, not blanket permission for subsequent migrations/deployments. Inspect every future pending migration and obtain approval; keep schema/code compatible.
 - Five manual channel cards containing25 already collected notices were confirmed by Discord API readback. The2026-10-14 live collection also completed22 snapshots and one new `externalInfo` notice delivery to computing, with marker1 and Components V2 readback; this does not prove every route or visual client rendering. Old combined channel is deleted and fallback is NULL.
 - The2026-10-14 follow-up explicitly approved push, migration0009/0011, deployment and workflow verification: notices/backfill in normal mode with `start=false`, OCR with `ingest=false`. The2026-10-15 follow-up separately approved push/deploy and actual backfill retry plus OCR `ingest=false` verification followed by `ingest=true` only after verification passed. These scoped approvals do not authorize future executions or secret changes. A cleanup request alone never authorizes external mutations. See [verification history](docs/VERIFICATION.md) for exact rollout provenance and unresolved limits.
