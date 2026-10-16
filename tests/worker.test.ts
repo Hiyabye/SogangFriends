@@ -2,7 +2,7 @@ import {afterEach, describe, expect, it, vi} from 'vitest';
 import {testDatabase} from './helpers/db';
 import worker, {handleRequest, completeInteraction} from '../src/worker';
 import {consume} from '../src/jobs';
-import {enqueue, recover, saveNotices} from '../src/storage';
+import {dispatch, enqueue, recover, saveNotices} from '../src/storage';
 import {validateMeal} from '../src/meals';
 import {addDays,todayKst} from '../src/time';
 import {SOURCES} from '../src/sources';
@@ -184,6 +184,21 @@ describe('interaction and durable integration',()=>{
  const payload=String(db.sqlite.prepare('SELECT payload FROM jobs').get()!.payload);
  expect(payload).toContain('secret-webhook');expect(payload).not.toContain('private-user');
  }finally{db.close();}});
+ it('enforces persisted propagation delay through Queue consumption, including an early duplicate',async()=>{
+ const db=testDatabase();try{
+ vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(new Date('2026-10-16T00:00:00Z'));
+ const fetchMock=vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response('{}'));
+ expect(await (await handleRequest(await signed(db.env,interaction('status')),db.env)).json()).toEqual({type:5,data:{flags:64}});
+ expect(db.sqlite.prepare("SELECT available_at FROM jobs WHERE id='interaction:123'").get()!.available_at).toBe('2026-10-16T00:00:02.000Z');
+ const batch={messages:[{body:{id:'interaction:123'},ack:vi.fn()}],queue:'test'} as any;
+ await consume(db.env,batch);vi.setSystemTime(new Date('2026-10-16T00:00:01.999Z'));
+ await dispatch(db.env);await consume(db.env,batch);
+ expect(fetchMock).not.toHaveBeenCalled();expect(db.env.JOBS.send).toHaveBeenCalledTimes(1);
+ expect(db.sqlite.prepare("SELECT state,attempts FROM jobs WHERE id='interaction:123'").get()).toMatchObject({state:'pending',attempts:0});
+ vi.setSystemTime(new Date('2026-10-16T00:00:02Z'));await consume(db.env,batch);
+ expect(fetchMock).toHaveBeenCalledTimes(1);expect(fetchMock.mock.calls[0][1]!.method).toBe('PATCH');
+ expect(db.sqlite.prepare("SELECT state,attempts,payload FROM jobs WHERE id='interaction:123'").get()).toMatchObject({state:'done',attempts:1,payload:'{}'});
+ }finally{db.close();vi.useRealTimers();}});
  it('status is guild scoped and webhook edit disables mentions',async()=>{
  const db=testDatabase();try{
  db.sqlite.exec("INSERT INTO guilds(id,notices_channel,updated_at) VALUES('111','1111','now'),('222','2222','now')");
@@ -203,6 +218,7 @@ describe('interaction and durable integration',()=>{
  const data={...interaction('meal','111','0'),data:{name:'meal',...(date?{options:[{name:'date',value:date}]}:{})}};
  const fetchMock=vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response('{}'));
  expect(await (await handleRequest(await signed(db.env,data),db.env)).json()).toEqual({type:5,data:{}});
+ vi.setSystemTime(Date.now()+2000);
  const job=db.sqlite.prepare("SELECT * FROM jobs WHERE id='interaction:123'").get()!;
  await completeInteraction(db.env,job as any);
  expect(fetchMock).toHaveBeenCalledTimes(1);expect(fetchMock.mock.calls[0][1]!.method).toBe('PATCH');
@@ -226,6 +242,7 @@ describe('interaction and durable integration',()=>{
  const download=vi.mocked((await import('../src/sources')).fetchImage);download.mockClear();download.mockResolvedValueOnce({bytes:new Uint8Array([1,2,3]),mime,hash:'fixture'});
  const fetchMock=vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response('{}'));
  expect(await (await handleRequest(await signed(db.env,interaction('meal','111','0')),db.env)).json()).toEqual({type:5,data:{}});
+ vi.setSystemTime(Date.now()+2000);
  const job=db.sqlite.prepare("SELECT * FROM jobs WHERE id='interaction:123'").get()!;
  await completeInteraction(db.env,job as any);
  expect(fetchMock).toHaveBeenCalledTimes(1);expect(fetchMock.mock.calls[0][1]!.method).toBe('PATCH');

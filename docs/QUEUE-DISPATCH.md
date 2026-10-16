@@ -56,10 +56,13 @@ active reservation. A replay can return202 even if the original Queue send faile
 202 means durable acceptance, not a successful Queue write, completed processing,
 raw archival or Discord delivery. The lease/recovery path preserves unsent work.
 
-Direct interaction dispatch retains its two-second Queue delay and reserves
-through that delay plus the grace period. As before, the enqueue and direct-send
-calls are separate: a concurrent global dispatcher can win between them, so this
-propagation delay is not a strict global minimum execution time.
+Interaction enqueue persists `available_at` two seconds after creation, before
+any dispatcher can see the row. Direct dispatch retains its two-second Queue
+delay and reserves through that delay plus the grace period; global dispatch
+cannot send it before its D1 due time. Even an early duplicate cannot claim the
+job before that time. This is a minimum from enqueue, not proof that Discord
+received the HTTP acknowledgement. If the direct producer stops before sending,
+the normal dispatcher can recover the job once due.
 
 ## Direct board planning
 

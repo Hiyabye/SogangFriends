@@ -3,16 +3,18 @@ import type {NoticeCard} from './notice-card';
 // Preserve historical claim/recovery semantics without retaining an inference implementation.
 const MEAL_MAX_ATTEMPTS = 10;
 export const nowIso = () => new Date().toISOString();
-export async function enqueue(env:Env,id:string,kind:string,payload:unknown) {
- await env.DB.prepare('INSERT OR IGNORE INTO jobs(id,kind,payload,created_at,available_at) VALUES(?,?,?,?,?)').bind(id,kind,JSON.stringify(payload),nowIso(),nowIso()).run();
+export async function enqueue(env:Env,id:string,kind:string,payload:unknown,delaySeconds=0) {
+ const now=Date.now();
+ await env.DB.prepare('INSERT OR IGNORE INTO jobs(id,kind,payload,created_at,available_at) VALUES(?,?,?,?,?)').bind(id,kind,JSON.stringify(payload),new Date(now).toISOString(),new Date(now+delaySeconds*1000).toISOString()).run();
 }
 const DISPATCH_LEASE_MS=2*60_000;
 export async function dispatchJob(env:Env,id:string,delaySeconds=0):Promise<boolean> {
- const at=nowIso();
+ const now=Date.now(),at=new Date(now).toISOString(),due=new Date(now+delaySeconds*1000).toISOString();
+ // A delayed producer may reserve ahead, but claim() still enforces available_at.
  // Reserve before sending. Keep the lease even on an unknown/failed send:
  // D1 recovery can retry later, without an immediate duplicate-send loop.
  const reserved=await env.DB.prepare("UPDATE jobs SET dispatch_until=? WHERE id=? AND state IN ('pending','retry') AND available_at<=? AND (dispatch_until IS NULL OR dispatch_until<=?) RETURNING id")
-  .bind(new Date(Date.now()+delaySeconds*1000+DISPATCH_LEASE_MS).toISOString(),id,at,at).first<{id:string}>();
+  .bind(new Date(now+delaySeconds*1000+DISPATCH_LEASE_MS).toISOString(),id,due,at).first<{id:string}>();
  if(!reserved)return false;
  if(delaySeconds)await env.JOBS.send({id},{delaySeconds});else await env.JOBS.send({id});
  return true;

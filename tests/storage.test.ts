@@ -77,6 +77,35 @@ describe('D1-style storage with actual SQLite',()=>{
   vi.advanceTimersByTime(120_000);await dispatch(db.env);
   expect(db.env.JOBS.send).toHaveBeenCalledTimes(1);
  });
+ it('persists delayed eligibility before dispatch and refuses early execution claims',async()=>{
+  vi.useFakeTimers();vi.setSystemTime(new Date('2026-10-16T00:00:00Z'));
+  await enqueue(db.env,'interaction:delayed','interaction',{token:'fixture'},2);
+  expect(row('jobs','interaction:delayed')).toMatchObject({created_at:'2026-10-16T00:00:00.000Z',available_at:'2026-10-16T00:00:02.000Z'});
+  // Simulate a global dispatcher winning between enqueue and the delayed producer.
+  await dispatch(db.env);expect(db.env.JOBS.send).not.toHaveBeenCalled();
+  expect(await dispatchJob(db.env,'interaction:delayed')).toBe(false);
+  expect(await claim(db.env,'interaction:delayed')).toBeNull();
+  expect(await dispatchJob(db.env,'interaction:delayed',1)).toBe(false);
+  expect(await dispatchJob(db.env,'interaction:delayed',2)).toBe(true);
+  expect(db.env.JOBS.send).toHaveBeenCalledWith({id:'interaction:delayed'},{delaySeconds:2});
+  // A replay must not postpone eligibility or bypass the dispatch reservation.
+  vi.advanceTimersByTime(1999);
+  await enqueue(db.env,'interaction:delayed','interaction',{token:'replacement'},2);
+  await dispatch(db.env);expect(await claim(db.env,'interaction:delayed')).toBeNull();
+  expect(row('jobs','interaction:delayed')).toMatchObject({attempts:0,available_at:'2026-10-16T00:00:02.000Z',payload:'{"token":"fixture"}'});
+  vi.advanceTimersByTime(1);
+  expect(await claim(db.env,'interaction:delayed')).toMatchObject({state:'running',attempts:1});
+  expect(db.env.JOBS.send).toHaveBeenCalledTimes(1);
+ });
+ it('recovers a delayed job through global dispatch when its direct producer never runs',async()=>{
+  vi.useFakeTimers();vi.setSystemTime(new Date('2026-10-16T00:00:00Z'));
+  await enqueue(db.env,'interaction:orphan','interaction',{},2);
+  vi.advanceTimersByTime(1999);await dispatch(db.env);
+  expect(db.env.JOBS.send).not.toHaveBeenCalled();
+  vi.advanceTimersByTime(1);await dispatch(db.env);
+  expect(db.env.JOBS.send).toHaveBeenCalledExactlyOnceWith({id:'interaction:orphan'});
+  expect(await claim(db.env,'interaction:orphan')).toMatchObject({attempts:1});
+ });
  it('bounds recovery after ambiguous sends without immediate replay or changing execution attempts',async()=>{
   vi.useFakeTimers();vi.setSystemTime(new Date('2026-10-16T00:00:00Z'));
   await enqueue(db.env,'lost','collect',{});
