@@ -6,17 +6,31 @@ export const nowIso = () => new Date().toISOString();
 export async function enqueue(env:Env,id:string,kind:string,payload:unknown) {
  await env.DB.prepare('INSERT OR IGNORE INTO jobs(id,kind,payload,created_at,available_at) VALUES(?,?,?,?,?)').bind(id,kind,JSON.stringify(payload),nowIso(),nowIso()).run();
 }
+const DISPATCH_LEASE_MS=2*60_000;
+export async function dispatchJob(env:Env,id:string,delaySeconds=0):Promise<boolean> {
+ const at=nowIso();
+ // Reserve before sending. Keep the lease even on an unknown/failed send:
+ // D1 recovery can retry later, without an immediate duplicate-send loop.
+ const reserved=await env.DB.prepare("UPDATE jobs SET dispatch_until=? WHERE id=? AND state IN ('pending','retry') AND available_at<=? AND (dispatch_until IS NULL OR dispatch_until<=?) RETURNING id")
+  .bind(new Date(Date.now()+delaySeconds*1000+DISPATCH_LEASE_MS).toISOString(),id,at,at).first<{id:string}>();
+ if(!reserved)return false;
+ if(delaySeconds)await env.JOBS.send({id},{delaySeconds});else await env.JOBS.send({id});
+ return true;
+}
 export async function dispatch(env:Env) {
- const rows=await env.DB.prepare("SELECT id FROM jobs WHERE state IN ('pending','retry') AND available_at<=? ORDER BY created_at LIMIT 40").bind(nowIso()).all<{id:string}>();
- for (const row of rows.results) await env.JOBS.send({id:row.id});
+ const at=nowIso();
+ const rows=await env.DB.prepare("SELECT id FROM jobs WHERE state IN ('pending','retry') AND available_at<=? AND (dispatch_until IS NULL OR dispatch_until<=?) ORDER BY created_at LIMIT 40").bind(at,at).all<{id:string}>();
+ for (const row of rows.results) await dispatchJob(env,row.id);
 }
 export async function claim(env:Env,id:string):Promise<Job|null> {
- return env.DB.prepare("UPDATE jobs SET state='running',attempts=attempts+1,lease_until=? WHERE id=? AND state IN ('pending','retry') AND available_at<=? AND attempts<CASE WHEN kind='meal-extract' THEN ? ELSE 3 END RETURNING *").bind(new Date(Date.now()+20*60_000).toISOString(),id,nowIso(),MEAL_MAX_ATTEMPTS).first<Job>();
+ return env.DB.prepare("UPDATE jobs SET state='running',attempts=attempts+1,dispatch_until=NULL,lease_until=? WHERE id=? AND state IN ('pending','retry') AND available_at<=? AND attempts<CASE WHEN kind='meal-extract' THEN ? ELSE 3 END RETURNING *").bind(new Date(Date.now()+20*60_000).toISOString(),id,nowIso(),MEAL_MAX_ATTEMPTS).first<Job>();
 }
-export async function retryJob(env:Env,job:Job,error:string,delay=60) {
+export async function retryJob(env:Env,job:Job,error:string,delay=60,queueRetry=false) {
  // Queue delay is capped at 24h, but D1 preserves a longer server-mandated meal wait.
  const wait=job.kind==='meal-extract'?Math.max(1,delay):Math.min(86400,Math.max(1,delay));
- await env.DB.prepare('UPDATE jobs SET state=?,error=?,available_at=?,lease_until=NULL WHERE id=? AND state=\'running\'').bind(job.attempts>=(job.kind==='meal-extract'?MEAL_MAX_ATTEMPTS:3)?(job.kind==='meal-extract'?'needs_review':'failed'):'retry',error,new Date(Date.now()+wait*1000).toISOString(),job.id).run();
+ const available=Date.now()+wait*1000;
+ // Native Queue retry already owns a message; Cron must not send another at its due time.
+ await env.DB.prepare('UPDATE jobs SET state=?,error=?,available_at=?,dispatch_until=?,lease_until=NULL WHERE id=? AND state=\'running\'').bind(job.attempts>=(job.kind==='meal-extract'?MEAL_MAX_ATTEMPTS:3)?(job.kind==='meal-extract'?'needs_review':'failed'):'retry',error,new Date(available).toISOString(),queueRetry?new Date(available+DISPATCH_LEASE_MS).toISOString():null,job.id).run();
 }
 export async function recover(env:Env) {
  // A crashed delivery may already exist at Discord. Never replay a POST blindly.

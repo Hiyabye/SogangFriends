@@ -113,10 +113,10 @@ describe('interaction and durable integration',()=>{
    expect(health.last_attempt).toBeTruthy();expect(health.last_success).toBeTruthy();expect(health.error).toBeNull();
    expect(db.sqlite.prepare("SELECT COUNT(*) AS n FROM jobs WHERE kind='collect'").get()!.n).toBe(SOURCES.length);
    expect(db.sqlite.prepare("SELECT COUNT(*) AS n FROM jobs WHERE kind='meal-discover'").get()!.n).toBe(1);
-   expect(db.env.JOBS.send).toHaveBeenCalledTimes(SOURCES.length+3);
-   expect(db.sqlite.prepare("SELECT COUNT(*) AS n FROM jobs WHERE kind IN ('meal-refresh','schedule-refresh')").get()!.n).toBe(2);
+   expect(db.env.JOBS.send).toHaveBeenCalledTimes(SOURCES.length+1);
+   expect(db.sqlite.prepare("SELECT COUNT(*) AS n FROM jobs WHERE kind IN ('meal-refresh','schedule-refresh','meal-board','schedule-summary')").get()!.n).toBe(0);
    await worker.scheduled(event,db.env);
-   expect(db.sqlite.prepare('SELECT COUNT(*) AS n FROM jobs').get()!.n).toBe(SOURCES.length+3);
+   expect(db.sqlite.prepare('SELECT COUNT(*) AS n FROM jobs').get()!.n).toBe(SOURCES.length+1);
   } finally {db.close();}
  });
  it('discovers source metadata but never plans inference even with stale legacy settings',async()=>{
@@ -179,6 +179,8 @@ describe('interaction and durable integration',()=>{
  const response=await handleRequest(await signed(db.env,interaction('status')),db.env);
  expect(await response.json()).toEqual({type:5,data:{flags:64}});
  expect(db.env.JOBS.send).toHaveBeenCalledWith({id:'interaction:123'},{delaySeconds:2});
+ expect(await (await handleRequest(await signed(db.env,interaction('status')),db.env)).json()).toEqual({type:5,data:{flags:64}});
+ expect(db.env.JOBS.send).toHaveBeenCalledTimes(1);
  const payload=String(db.sqlite.prepare('SELECT payload FROM jobs').get()!.payload);
  expect(payload).toContain('secret-webhook');expect(payload).not.toContain('private-user');
  }finally{db.close();}});

@@ -211,19 +211,21 @@ describe('change-driven persistent boards',()=>{
   await updateScheduleSummary(db.env,'111','333','2026-10-13',[item]);await updateScheduleSummary(db.env,'111','333','2026-10-13',[item]);expect(network).toHaveBeenCalledTimes(1);
   item.title='변경 일정';await updateScheduleSummary(db.env,'111','333','2026-10-13',[item],false);expect(network.mock.calls[1][1]!.method).toBe('PATCH');expect(JSON.stringify(payload(network.mock.calls[1]))).toContain('변경 일정');
  });
- it('isolates guild queues so one rate-limited board cannot block another',async()=>{
+ it.each(['legacy','direct'])('isolates %s guild queues so one rate-limited board cannot block another',async mode=>{
   vi.setSystemTime(new Date('2026-10-12T22:00:00Z'));seed();db.sqlite.exec("INSERT INTO guilds(id,meals_channel,updated_at) VALUES('222','999','now')");
-  await executeJob(db.env,{id:'slot',kind:'meal-report',payload:JSON.stringify({date:'2026-10-13',mealSlot:'morning'})} as Job);
-  const children=db.sqlite.prepare("SELECT * FROM jobs WHERE kind='meal-board' ORDER BY id").all() as unknown as Job[];expect(children).toHaveLength(2);
+  if(mode==='legacy')await executeJob(db.env,{id:'slot',kind:'meal-report',payload:JSON.stringify({date:'2026-10-13',mealSlot:'morning'})} as Job);
+  else await planCron(db.env,Date.now());
+  const children=(db.sqlite.prepare("SELECT * FROM jobs WHERE kind='meal-board' ORDER BY id").all() as unknown as Job[]).filter(job=>JSON.parse(job.payload).allowCreate);expect(children).toHaveLength(2);
   const network=vi.spyOn(globalThis,'fetch').mockResolvedValueOnce(Response.json({retry_after:120},{status:429})).mockResolvedValueOnce(Response.json({id:'777',channel_id:'999'}));
   await expect(executeJob(db.env,children[0])).rejects.toBeInstanceOf(BoardRetry);await executeJob(db.env,children[1]);
   expect(network).toHaveBeenCalledTimes(2);expect(db.sqlite.prepare("SELECT message_id FROM meal_messages WHERE guild_id='222'").get()!.message_id).toBe('777');
  });
  it('polls every 15 minutes but does not bootstrap new boards outside their approved windows',async()=>{
   vi.setSystemTime(new Date('2026-10-13T02:00:00Z'));seed();const network=vi.spyOn(globalThis,'fetch').mockResolvedValue(sent());await planCron(db.env,Date.now());
-  expect(db.sqlite.prepare("SELECT kind FROM jobs WHERE kind IN ('meal-refresh','schedule-refresh') ORDER BY kind").all()).toEqual([{kind:'meal-refresh'},{kind:'schedule-refresh'}]);
-  const refreshes=db.sqlite.prepare("SELECT * FROM jobs WHERE kind IN ('meal-refresh','schedule-refresh')").all() as unknown as Job[];
-  for(const refresh of refreshes)await executeJob(db.env,refresh);
+  expect(db.sqlite.prepare("SELECT kind FROM jobs WHERE kind IN ('meal-refresh','schedule-refresh')").all()).toEqual([]);
+  const refreshes=db.sqlite.prepare("SELECT * FROM jobs WHERE kind IN ('meal-board','schedule-summary') ORDER BY kind").all() as unknown as Job[];
+  expect(refreshes.map(job=>job.kind)).toEqual(['meal-board','schedule-summary']);
+  expect(refreshes.map(job=>JSON.parse(job.payload).allowCreate)).toEqual([false,false]);
   await executeJob(db.env,{id:'stale-slot',kind:'meal-report',payload:JSON.stringify({date:'2026-10-13',mealSlot:'morning'})} as Job);
   const children=db.sqlite.prepare("SELECT * FROM jobs WHERE kind IN ('meal-board','schedule-summary')").all() as unknown as Job[];expect(children).toHaveLength(3);
   for(const child of children)await executeJob(db.env,child);

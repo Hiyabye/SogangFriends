@@ -4,7 +4,7 @@ import { SOURCES } from './sources';
 import { todayKst, validDate } from './time';
 import { upcomingSchedules } from './schedule';
 import { consume, getSchedules, mealCommandResponse, planCron } from './jobs';
-import { enqueue, nowIso } from './storage';
+import { dispatchJob, enqueue, nowIso } from './storage';
 import {handleNoticeIngest} from './notice-ingest';
 import {handleNoticeArchive} from './notice-archive';
 import {handleMealOcr} from './meal-ocr';
@@ -34,7 +34,7 @@ export async function handleRequest(request:Request,env:Env):Promise<Response> {
  try {
  // Tokens are transient, never logged, removed at completion; Queue carries only a job ID.
  await enqueue(env,`interaction:${interaction.id}`,'interaction',{interaction:{id:interaction.id,application_id:interaction.application_id,token:interaction.token,type:interaction.type,guild_id:interaction.guild_id,member:{permissions:interaction.member?.permissions},data:interaction.data},expires:Date.now()+12*60_000});
- await env.JOBS.send({id:`interaction:${interaction.id}`},{delaySeconds:2});
+ await dispatchJob(env,`interaction:${interaction.id}`,2);
  return Response.json({type:5,data:admin?{flags:64}:{}});
  } catch {return reply('작업을 접수하지 못했습니다. 잠시 후 다시 시도하세요.');}
 }

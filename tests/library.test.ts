@@ -271,7 +271,7 @@ describe('library poll scheduling and health',()=>{
   vi.spyOn(console,'info').mockImplementation(()=>{});
   await worker.scheduled({cron:'*/15 * * * *',scheduledTime:Date.now()} as ScheduledController,db.env);
   expect(fetcher).not.toHaveBeenCalled();
-  expect(db.sqlite.prepare("SELECT kind FROM jobs ORDER BY kind").all().map(row=>row.kind)).toEqual(['meal-discover','meal-refresh','schedule-refresh']);
+  expect(db.sqlite.prepare("SELECT kind FROM jobs ORDER BY kind").all().map(row=>row.kind)).toEqual(['meal-discover']);
   expect(db.sqlite.prepare("SELECT * FROM health WHERE id='cron'").get()).toMatchObject({last_attempt:iso(),last_success:iso(),error:null});
  });
 });

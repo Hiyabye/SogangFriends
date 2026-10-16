@@ -1,6 +1,7 @@
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 import {testDatabase} from './helpers/db';
-import {consume,mealReportResponse,planCron} from '../src/jobs';
+import {consume,executeJob,mealReportResponse,planCron} from '../src/jobs';
+import type {Job} from '../src/types';
 import {deliveryIntent} from '../src/storage';
 import {addDays} from '../src/time';
 import {fetchImage} from '../src/sources';
@@ -91,9 +92,70 @@ describe('paired meal reports',()=>{
   seed();const a=await intent();await intent();vi.setSystemTime(new Date('2026-10-13T08:30:00Z'));const b=await intent('evening');await intent('evening');
   expect(a).not.toBe(b);expect(db.sqlite.prepare('SELECT COUNT(*) n FROM deliveries').get()!.n).toBe(2);
  });
- it('plans only the approved report windows while retaining 07:30 schedule-board timing',async()=>{
+ it('plans direct children only in approved creation windows and deduplicates repeat ticks',async()=>{
+  db.env.NOTICE_COLLECTION_MODE='external';db.sqlite.exec("UPDATE guilds SET schedule_channel='2001' WHERE id='111'");
   for(const time of ['2026-10-12T22:00:00Z','2026-10-12T22:00:00Z','2026-10-12T22:15:00Z','2026-10-12T22:30:00Z','2026-10-13T08:30:00Z'])await planCron(db.env,Date.parse(time));
-  const jobs=db.sqlite.prepare("SELECT id,kind FROM jobs WHERE kind IN ('meal-report','meal-daily','schedule-daily') ORDER BY id").all();
-  expect(jobs).toEqual([{id:'meal-report:2026-10-13:evening',kind:'meal-report'},{id:'meal-report:2026-10-13:morning',kind:'meal-report'},{id:'schedule-daily:2026-10-13',kind:'schedule-daily'}]);
+  const jobs=db.sqlite.prepare("SELECT id,kind,payload FROM jobs WHERE kind IN ('meal-board','schedule-summary') ORDER BY id").all();
+  const creation=jobs.filter(job=>JSON.parse(String(job.payload)).allowCreate);
+  expect(creation.map(({id,kind})=>({id,kind}))).toEqual([
+   {id:'meal-board:meal-report:2026-10-13:evening:111:1001',kind:'meal-board'},
+   {id:'meal-board:meal-report:2026-10-13:morning:111:1001',kind:'meal-board'},
+   {id:'schedule-summary:111:2001:2026-10-13',kind:'schedule-summary'}
+  ]);
+  expect(creation.slice(0,2).map(job=>JSON.parse(String(job.payload)).mealSlot)).toEqual(['evening','morning']);
+  expect(jobs).toHaveLength(11);
+  expect(db.sqlite.prepare("SELECT kind FROM jobs WHERE kind IN ('meal-report','meal-daily','meal-refresh','schedule-daily','schedule-refresh')").all()).toEqual([]);
+ });
+ it.each([
+  ['2026-10-12T21:45:00Z',false,false,false],
+  ['2026-10-12T22:00:00Z',true,true,false],
+  ['2026-10-12T22:15:00Z',true,false,false],
+  ['2026-10-12T22:30:00Z',true,false,true],
+  ['2026-10-12T22:45:00Z',true,false,false],
+  ['2026-10-13T08:15:00Z',true,false,false],
+  ['2026-10-13T08:30:00Z',true,true,false],
+  ['2026-10-13T08:45:00Z',true,false,false],
+  ['2026-10-13T15:00:00Z',false,false,false]
+ ])('preserves refresh and creation boundaries at %s',async(time,mealRefresh,mealCreate,scheduleCreate)=>{
+  db.env.NOTICE_COLLECTION_MODE='external';db.sqlite.exec("UPDATE guilds SET schedule_channel='2001' WHERE id='111'");
+  vi.setSystemTime(new Date(time));await planCron(db.env,Date.now());
+  const jobs=db.sqlite.prepare("SELECT kind,payload FROM jobs WHERE kind IN ('meal-board','schedule-summary')").all();
+  expect(jobs.filter(job=>job.kind==='meal-board'&&!JSON.parse(String(job.payload)).allowCreate)).toHaveLength(mealRefresh?1:0);
+  expect(jobs.filter(job=>job.kind==='meal-board'&&JSON.parse(String(job.payload)).allowCreate)).toHaveLength(mealCreate?1:0);
+  expect(jobs.filter(job=>job.kind==='schedule-summary'&&!JSON.parse(String(job.payload)).allowCreate)).toHaveLength(1);
+  expect(jobs.filter(job=>job.kind==='schedule-summary'&&JSON.parse(String(job.payload)).allowCreate)).toHaveLength(scheduleCreate?1:0);
+ });
+ it.each(['07:45','invalid'])('retains configured schedule creation timing for %s',async target=>{
+  db.env.NOTICE_COLLECTION_MODE='external';db.env.MEAL_TIME_KST=target;db.sqlite.exec("UPDATE guilds SET schedule_channel='2001' WHERE id='111'");
+  const time=target==='invalid'?'2026-10-12T22:30:00Z':'2026-10-12T22:45:00Z';
+  await planCron(db.env,Date.parse(time));
+  expect(JSON.parse(String(db.sqlite.prepare("SELECT payload FROM jobs WHERE id='schedule-summary:111:2001:2026-10-13'").get()!.payload)).allowCreate).toBe(true);
+ });
+ it('reuses legacy child IDs in either execution order and excludes unconfigured or disallowed guilds',async()=>{
+  db.env.NOTICE_COLLECTION_MODE='external';vi.setSystemTime(new Date('2026-10-12T22:30:00Z'));
+  db.sqlite.exec("UPDATE guilds SET schedule_channel='2001' WHERE id='111'; INSERT INTO guilds(id,meals_channel,schedule_channel,updated_at) VALUES('222','1002','2002','now'),('333','1003','2003','now'),('444',NULL,NULL,'now')");
+  const date='2026-10-13',quarter=Math.floor(Date.now()/(15*60_000));
+  const wrappers=[
+   {id:`schedule-daily:${date}`,kind:'schedule-daily',payload:JSON.stringify({date})},
+   {id:`schedule-refresh:${quarter}`,kind:'schedule-refresh',payload:JSON.stringify({date})},
+   {id:`meal-refresh:${quarter}`,kind:'meal-refresh',payload:JSON.stringify({date})}
+  ] as Job[];
+  for(const job of wrappers)await executeJob(db.env,job);
+  await planCron(db.env,Date.now());
+  const before=db.sqlite.prepare("SELECT id,payload FROM jobs WHERE kind IN ('meal-board','schedule-summary') ORDER BY id").all();
+  for(const job of wrappers)await executeJob(db.env,job);
+  await planCron(db.env,Date.now());
+  expect(db.sqlite.prepare("SELECT id,payload FROM jobs WHERE kind IN ('meal-board','schedule-summary') ORDER BY id").all()).toEqual(before);
+  expect(before).toHaveLength(6);expect(before.every(job=>['111','222'].includes(JSON.parse(String(job.payload)).guild))).toBe(true);
+  vi.setSystemTime(new Date('2026-10-13T08:30:00Z'));await planCron(db.env,Date.now());
+  const evening=db.sqlite.prepare("SELECT id,payload FROM jobs WHERE id LIKE 'meal-board:meal-report:%:evening:%' ORDER BY id").all();
+  await executeJob(db.env,{id:`meal-report:${date}:evening`,kind:'meal-report',payload:JSON.stringify({date,mealSlot:'evening'})} as Job);
+  expect(db.sqlite.prepare("SELECT id,payload FROM jobs WHERE id LIKE 'meal-board:meal-report:%:evening:%' ORDER BY id").all()).toEqual(evening);expect(evening).toHaveLength(2);
+ });
+ it.each(['2026-10-12T22:15:00Z','2026-10-13T08:30:00Z','2026-10-13T15:00:00Z'])('does not bootstrap a planned morning board when consumed at %s',async time=>{
+  db.env.NOTICE_COLLECTION_MODE='external';vi.setSystemTime(new Date('2026-10-12T22:00:00Z'));await planCron(db.env,Date.now());
+  const job=db.sqlite.prepare("SELECT * FROM jobs WHERE id='meal-board:meal-report:2026-10-13:morning:111:1001'").get() as unknown as Job;
+  const network=vi.spyOn(globalThis,'fetch');vi.setSystemTime(new Date(time));await executeJob(db.env,job);
+  expect(network).not.toHaveBeenCalled();expect(db.sqlite.prepare('SELECT COUNT(*) n FROM meal_messages').get()!.n).toBe(0);
  });
 });

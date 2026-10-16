@@ -2,7 +2,7 @@ import type {Env,Notice} from './types';
 import {SOURCES} from './sources';
 import {noticeDetailUrl} from './legacy-notice-sources.ts';
 import {validDate} from './time';
-import {enqueue} from './storage';
+import {dispatchJob,enqueue} from './storage';
 const LIMIT=256*1024;
 const hex=(bytes:ArrayBuffer)=>Array.from(new Uint8Array(bytes),b=>b.toString(16).padStart(2,'0')).join('');
 export function validateNoticeSnapshot(value:unknown):{source:string;notices:Notice[]} {
@@ -54,7 +54,7 @@ export async function handleNoticeIngest(request:Request,env:Env):Promise<Respon
  if(Math.abs(Date.now()-Number(verified.timestamp))>5*60_000)return new Response('Unauthorized',{status:401});
  try{
   await enqueue(env,id,'notice-snapshot',snapshot);
-  await env.JOBS.send({id});
+  await dispatchJob(env,id);
   return Response.json({accepted:true,id},{status:202});
  }catch{return new Response('Snapshot dispatch unavailable; retry the same signed request',{status:503});}
 }

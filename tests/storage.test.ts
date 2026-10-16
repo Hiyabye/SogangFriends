@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { testDatabase } from './helpers/db';
-import { claim, deliveryIntent, dispatch, enqueue, recover, retryJob, saveNotices, sourceFailure } from '../src/storage';
+import { claim, deliveryIntent, dispatch, dispatchJob, enqueue, recover, retryJob, saveNotices, sourceFailure } from '../src/storage';
 import { consume, executeJob } from '../src/jobs';
 import type { Job, Notice } from '../src/types';
 
@@ -63,6 +63,85 @@ describe('D1-style storage with actual SQLite',()=>{
   expect(row('deliveries','notice:222')).toMatchObject({guild_id:'222',channel_id:'2002'});
   await dispatch(db.env);
   expect(db.env.JOBS.send).toHaveBeenCalledTimes(2);
+ });
+ it('atomically reserves dispatch across overlapping producers and repeated scans',async()=>{
+  vi.useFakeTimers();vi.setSystemTime(new Date('2026-10-16T00:00:00Z'));
+  await enqueue(db.env,'queued','collect',{});
+  await Promise.all([dispatch(db.env),dispatch(db.env),dispatchJob(db.env,'queued')]);
+  await dispatch(db.env);
+  expect(db.env.JOBS.send).toHaveBeenCalledTimes(1);
+  expect(row('jobs','queued')).toMatchObject({state:'pending',attempts:0,lease_until:null,dispatch_until:'2026-10-16T00:02:00.000Z'});
+  const claimed=await claim(db.env,'queued');
+  expect(claimed).toMatchObject({state:'running',attempts:1});
+  expect(row('jobs','queued')!.dispatch_until).toBeNull();
+  vi.advanceTimersByTime(120_000);await dispatch(db.env);
+  expect(db.env.JOBS.send).toHaveBeenCalledTimes(1);
+ });
+ it('bounds recovery after ambiguous sends without immediate replay or changing execution attempts',async()=>{
+  vi.useFakeTimers();vi.setSystemTime(new Date('2026-10-16T00:00:00Z'));
+  await enqueue(db.env,'lost','collect',{});
+  vi.mocked(db.env.JOBS.send).mockRejectedValueOnce(new Error('acceptance unknown'));
+  await expect(dispatchJob(db.env,'lost')).rejects.toThrow('acceptance unknown');
+  expect(await dispatchJob(db.env,'lost')).toBe(false);
+  await dispatch(db.env);vi.advanceTimersByTime(119_999);await dispatch(db.env);
+  expect(db.env.JOBS.send).toHaveBeenCalledTimes(1);
+  vi.advanceTimersByTime(1);await dispatch(db.env);
+  expect(db.env.JOBS.send).toHaveBeenCalledTimes(2);
+  expect(row('jobs','lost')).toMatchObject({state:'pending',attempts:0});
+ });
+ it('recovers an accepted message that never executes, but never redispatches terminal jobs',async()=>{
+  vi.useFakeTimers();vi.setSystemTime(new Date('2026-10-16T00:00:00Z'));
+  await enqueue(db.env,'unconsumed','collect',{});await dispatch(db.env);
+  vi.advanceTimersByTime(120_000);await dispatch(db.env);
+  expect(db.env.JOBS.send).toHaveBeenCalledTimes(2);
+  db.sqlite.prepare("UPDATE jobs SET state='done' WHERE id='unconsumed'").run();
+  vi.advanceTimersByTime(120_000);expect(await dispatchJob(db.env,'unconsumed')).toBe(false);
+  await dispatch(db.env);expect(db.env.JOBS.send).toHaveBeenCalledTimes(2);
+ });
+ it('does not amplify a backlog or duplicate Queue deliveries into additional messages',async()=>{
+  db.env.NOTICE_COLLECTION_MODE='external';
+  for(let i=0;i<24;i++)await enqueue(db.env,`backlog:${i}`,'collect',{});
+  await dispatch(db.env);
+  const messages=vi.mocked(db.env.JOBS.send).mock.calls.map(([body])=>body);
+  for(const body of messages){
+   await consume(db.env,{messages:[{body,ack:vi.fn()}]} as never);
+   await consume(db.env,{messages:[{body,ack:vi.fn()}]} as never);
+  }
+  expect(db.env.JOBS.send).toHaveBeenCalledTimes(24);
+  expect(db.sqlite.prepare("SELECT COUNT(*) n FROM jobs WHERE state='done' AND attempts=1").get()!.n).toBe(24);
+ });
+ it('reserves delayed direct sends and native retries while ordinary D1 retries remain dispatchable',async()=>{
+  vi.useFakeTimers();vi.setSystemTime(new Date('2026-10-16T00:00:00Z'));
+  await enqueue(db.env,'delayed','collect',{});await dispatchJob(db.env,'delayed',2);
+  expect(db.env.JOBS.send).toHaveBeenCalledWith({id:'delayed'},{delaySeconds:2});
+  expect(row('jobs','delayed')!.dispatch_until).toBe('2026-10-16T00:02:02.000Z');
+  const first=(await claim(db.env,'delayed'))!;
+  await retryJob(db.env,first,'temporary',120,true);
+  expect(await dispatchJob(db.env,'delayed')).toBe(false);
+  vi.advanceTimersByTime(120_000);await dispatch(db.env);
+  expect(db.env.JOBS.send).toHaveBeenCalledTimes(1);
+  // The existing Queue message can execute at available_at despite its dispatch reservation.
+  const second=(await claim(db.env,'delayed'))!;expect(second.attempts).toBe(2);
+  await retryJob(db.env,second,'temporary',60);
+  expect(row('jobs','delayed')!.dispatch_until).toBeNull();
+  await dispatch(db.env);expect(db.env.JOBS.send).toHaveBeenCalledTimes(1);
+  vi.advanceTimersByTime(60_000);await dispatch(db.env);
+  expect(db.env.JOBS.send).toHaveBeenCalledTimes(2);
+ });
+ it('recovers a lost native retry only after its due time plus dispatch grace',async()=>{
+  vi.useFakeTimers();vi.setSystemTime(new Date('2026-10-16T00:00:00Z'));
+  await enqueue(db.env,'native','notice-snapshot',{});
+  await retryJob(db.env,(await claim(db.env,'native'))!,'temporary',120,true);
+  vi.advanceTimersByTime(239_999);await dispatch(db.env);
+  expect(db.env.JOBS.send).not.toHaveBeenCalled();
+  vi.advanceTimersByTime(1);await dispatch(db.env);
+  expect(db.env.JOBS.send).toHaveBeenCalledOnce();
+  expect(row('jobs','native')).toMatchObject({state:'retry',attempts:1});
+ });
+ it('does not let reserved jobs consume the dispatch scan limit',async()=>{
+  for(let i=0;i<41;i++)await enqueue(db.env,`scan:${i}`,'collect',{});
+  await dispatch(db.env);expect(db.env.JOBS.send).toHaveBeenCalledTimes(40);
+  await dispatch(db.env);expect(db.env.JOBS.send).toHaveBeenCalledTimes(41);
  });
  it('rolls back all statements in a failed D1-style batch',async()=>{
   await expect(db.env.DB.batch([

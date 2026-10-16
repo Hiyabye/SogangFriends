@@ -1,6 +1,7 @@
 import {describe,it,expect,vi,afterEach} from 'vitest';
 import {handleRequest} from '../src/worker';
 import {consume,planCron} from '../src/jobs';
+import {dispatch} from '../src/storage';
 import {validateNoticeSnapshot} from '../src/notice-ingest';
 import {SOURCES} from '../src/sources';
 import {noticeDetailUrl} from '../src/legacy-notice-sources.ts';
@@ -78,7 +79,7 @@ describe('authenticated notice ingestion',()=>{
    const r=await request({source:source.id,notices:[notice(source.id)]});const replay=r.clone();
    const first=await handleRequest(r,db.env);expect(first.status).toBe(202);const {id}=await first.json() as {id:string};
    expect((await handleRequest(replay,db.env)).status).toBe(202);
-   expect(db.env.JOBS.send).toHaveBeenCalledWith({id});
+   expect(db.env.JOBS.send).toHaveBeenCalledExactlyOnceWith({id});
    expect(db.sqlite.prepare('SELECT COUNT(*) AS n FROM jobs').get()!.n).toBe(1);
    const msg={body:{id},ack:vi.fn()};await consume(db.env,{messages:[msg]} as any);await consume(db.env,{messages:[msg]} as any);
    expect(db.sqlite.prepare('SELECT COUNT(*) AS n FROM notices').get()!.n).toBe(1);
@@ -90,12 +91,19 @@ describe('authenticated notice ingestion',()=>{
    expect(db.sqlite.prepare("SELECT COUNT(*) AS n FROM jobs WHERE kind='notice-alert'").get()!.n).toBe(1);
   }finally{db.close();}
  });
- it('retries ambiguous dispatch using the same durable job instead of losing the snapshot',async()=>{
+ it('preserves ambiguous dispatch for bounded recovery without resending on signed replay',async()=>{
+  vi.useFakeTimers();vi.setSystemTime(new Date('2026-10-16T00:00:00Z'));
   const db=database();try {
    vi.mocked(db.env.JOBS.send).mockRejectedValueOnce(new Error('network'));
    const r=await request({source:'news',notices:[notice('news')]});const replay=r.clone();
    expect((await handleRequest(r,db.env)).status).toBe(503);expect((await handleRequest(replay,db.env)).status).toBe(202);
    expect(db.sqlite.prepare('SELECT COUNT(*) AS n FROM jobs').get()!.n).toBe(1);
+   expect(db.env.JOBS.send).toHaveBeenCalledTimes(1);
+   vi.advanceTimersByTime(120_000);await dispatch(db.env);
+   expect(db.env.JOBS.send).toHaveBeenCalledTimes(2);
+   const {id}=vi.mocked(db.env.JOBS.send).mock.calls[1][0];
+   await consume(db.env,{messages:[{body:{id},ack:vi.fn()}]} as never);
+   expect(db.sqlite.prepare('SELECT initialized FROM sources WHERE id=?').get('news')!.initialized).toBe(1);
   }finally{db.close();}
  });
  it('external mode does not schedule direct school fetches but retains meal planning',async()=>{
@@ -105,7 +113,8 @@ describe('authenticated notice ingestion',()=>{
    expect(db.sqlite.prepare("SELECT COUNT(*) AS n FROM jobs WHERE kind='meal-discover'").get()!.n).toBe(1);
   }finally{db.close();}
  });
- it('retries transient snapshot processing through Queue delay without relying on Cron',async()=>{
+ it('retries transient snapshot processing through Queue delay without competing Cron sends',async()=>{
+  vi.useFakeTimers();vi.setSystemTime(new Date('2026-10-16T00:00:00Z'));
   const db=database();try{
    vi.spyOn(console,'error').mockImplementation(()=>{});
    const accepted=await handleRequest(await request({source:'news',notices:[notice('news')]}),db.env);const {id}=await accepted.json() as {id:string};
@@ -114,7 +123,8 @@ describe('authenticated notice ingestion',()=>{
    await consume(db.env,{messages:[msg]} as any);
    expect(msg.ack).not.toHaveBeenCalled();expect(msg.retry).toHaveBeenCalledWith({delaySeconds:120});
    expect(db.sqlite.prepare('SELECT state FROM jobs WHERE id=?').get(id)!.state).toBe('retry');
-   db.sqlite.prepare('UPDATE jobs SET available_at=? WHERE id=?').run(new Date(Date.now()-1000).toISOString(),id);
+   vi.advanceTimersByTime(120_000);await dispatch(db.env);
+   expect(db.env.JOBS.send).toHaveBeenCalledTimes(1);
    await consume(db.env,{messages:[msg]} as any);
    expect(msg.ack).toHaveBeenCalledTimes(1);expect(db.sqlite.prepare('SELECT state FROM jobs WHERE id=?').get(id)!.state).toBe('done');
    expect(db.sqlite.prepare('SELECT COUNT(*) AS n FROM notices').get()!.n).toBe(1);

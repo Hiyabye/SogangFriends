@@ -110,15 +110,17 @@ export async function planCron(env:Env,scheduledTime:number) {
  const target=/^([01]\d|2[0-3]):[0-5]\d$/.test(env.MEAL_TIME_KST??'')?env.MEAL_TIME_KST!:'07:30';
  // Only the current quarter-hour window; no replay of missed daily broadcasts after downtime.
  const mins=(s:string)=>Number(s.slice(0,2))*60+Number(s.slice(3));
+ const schedules=await recipients(env,'schedule_channel'),meals=await recipients(env,'meals_channel');
+ // Reuse legacy fan-out child IDs so already queued wrappers cannot duplicate this work.
  if(mins(hhmm)>=mins(target)&&mins(hhmm)<mins(target)+15) {
- await enqueue(env,`schedule-daily:${date}`,'schedule-daily',{date});
+  for(const g of schedules)await enqueue(env,`schedule-summary:${g.id}:${g.channel}:${date}`,'schedule-summary',{guild:g.id,channel:g.channel,date,allowCreate:true});
  }
  for(const [mealSlot,time] of [['morning','07:00'],['evening','17:30']] as const){
-  if(mins(hhmm)>=mins(time)&&mins(hhmm)<mins(time)+15)await enqueue(env,`meal-report:${date}:${mealSlot}`,'meal-report',{date,mealSlot});
+  if(mins(hhmm)>=mins(time)&&mins(hhmm)<mins(time)+15)for(const g of meals)await enqueue(env,`meal-board:meal-report:${date}:${mealSlot}:${g.id}:${g.channel}`,'meal-board',{guild:g.id,channel:g.channel,date,mealSlot,allowCreate:true});
  }
  const quarter=Math.floor(scheduledTime/(15*60_000));
- await enqueue(env,`schedule-refresh:${quarter}`,'schedule-refresh',{date});
- if(activeMealSlot(new Date(scheduledTime)))await enqueue(env,`meal-refresh:${quarter}`,'meal-refresh',{date});
+ for(const g of schedules)await enqueue(env,`schedule-summary:${g.id}:${g.channel}:${date}:schedule-refresh:${quarter}`,'schedule-summary',{guild:g.id,channel:g.channel,date,allowCreate:false});
+ if(activeMealSlot(new Date(scheduledTime)))for(const g of meals)await enqueue(env,`meal-board:meal-refresh:${quarter}:${g.id}:${g.channel}`,'meal-board',{guild:g.id,channel:g.channel,date,allowCreate:false});
  await dispatch(env);
 }
 async function recipients(env:Env,field:'notices_channel'|'meals_channel'|'schedule_channel') {
@@ -305,9 +307,9 @@ export async function consume(env:Env,batch:MessageBatch<{id:string}>) {
  await env.DB.prepare("UPDATE jobs SET state='failed',lease_until=NULL,error='Notice snapshot expired' WHERE id=?").bind(job.id).run();
  } else {
  const delay=(error as {retryAfter?:number})?.retryAfter??Math.min(3600,60*2**job.attempts);
- await retryJob(env,job,sourceError??'job failed',delay);
  // Caught snapshot failures schedule their own retry rather than waiting for Cron.
  if(job.kind==='notice-snapshot'&&job.attempts<3)snapshotRetry=Math.min(86400,Math.max(1,Math.ceil(delay)));
+ await retryJob(env,job,sourceError??'job failed',snapshotRetry??delay,snapshotRetry!==undefined);
  }
  }
  // Tokens persist only while waiting; clear after any terminal interaction attempt.
