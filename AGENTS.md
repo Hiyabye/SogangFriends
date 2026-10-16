@@ -20,8 +20,8 @@ Use **Node >=24**, npm and the committed `package-lock.json`. TypeScript runs in
 | HTTP signature verification, defer, commands | `src/worker.ts`, `src/discord.ts` |
 | Cron planning and Queue consumption | `src/jobs.ts` |
 | D1 claims, outbox, baselines and recovery | `src/storage.ts`, `migrations/` |
-| Eighteen official notice sources | `src/sources.ts`, `src/university-notice-sources.ts`, `src/legacy-notice-sources.ts` |
-| Five institution routes | `src/notice-channels.ts` |
+| Official notice sources (18 deployed; four Engineering additions local only) | `src/sources.ts`, `src/university-notice-sources.ts`, `src/legacy-notice-sources.ts`, `src/engineering-notice-sources.ts` |
+| Institution routes (five deployed; Engineering sixth local only) | `src/notice-channels.ts` |
 | Snapshot HMAC ingress | `src/notice-ingest.ts` |
 | Raw archive, pagination and D1 limits | `src/notice-archive*.ts`, `scripts/notice-archive-client.mjs` |
 | Recent collection / historical traversal | `scripts/notice-collector.mjs`, `scripts/backfill-notices.mjs` |
@@ -72,7 +72,7 @@ git diff --check
 
 ## Notices
 
-The eighteen boards map to five groups (expanded Worker deployed and collector pushed with approval on2026-10-16; new baselines await first successful collection):
+The local catalog includes22 boards in six groups. Production remains at18 boards in five groups (expanded Worker deployed and collector pushed with approval on2026-10-16; new baselines await first successful collection). Engineering is approved for local implementation only:
 
 | Setup group | Source IDs |
 |---|---|
@@ -81,7 +81,9 @@ The eighteen boards map to five groups (expanded Worker deployed and collector p
 | `swedu` | `sweduNotice`, `sweduNews`, `sweduPress` |
 | `convedu` | `conveduNotice`, `conveduNews` |
 | `bdata` | `bdataNotice`, `bdataNews` |
+| `engineering` (local only) | `engineeringNotice`, `engineeringRecruit`, `engineeringAcademic`, `engineeringResearch` |
 
+- Engineering adds nullable `guilds.engineering_channel` in local migration0012 and `/setup engineering`. Intended channel is `1560465047128514640`, not a hard-coded runtime destination or verified live setting. Newsletter/Dean's List and individual department sites are out of scope. Apply the separately approved additive remote migration before the Worker that queries the new column; update command definitions and validate/configure the channel before collector push. Every external action still needs explicit approval. New sources establish silent baselines; do not replay old notices or start backfill automatically.
 - Dedicated institution channel overrides `notices_channel`; never also send to fallback. With neither configured, skip that group. Group by destination **before** card batching, preserving existing delivery IDs/committed plans.
 - Current production uses all five institution channels with **NULL fallback**; the former combined channel was deleted. Do not restore it from historical verification records.
 - `legacy-notice-sources.ts` is **active** CMS/WebSTYLIST support, not dead bot code. The big-data wrapper ID is not its article ID. Keep canonical detail URL checks in ingestion.

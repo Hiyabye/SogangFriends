@@ -2,6 +2,7 @@ import {parse,type DefaultTreeAdapterMap} from 'parse5';
 import type {Notice,Source} from './types';
 import {validDate} from './time.ts';
 import {universityBoardId} from './university-notice-sources.ts';
+import {engineeringDetailUrl} from './engineering-notice-sources.ts';
 
 type Node=DefaultTreeAdapterMap['node'];
 const attr=(n:Node,key:string)=>'attrs'in n?n.attrs.find(a=>a.name===key)?.value??'':'';
@@ -28,6 +29,7 @@ export function noticeDetailUrl(source:Source,id:string):string{
  if(!positive(id))throw new Error('Invalid notice identity');
  if(source.kind==='university')return `https://www.sogang.ac.kr/ko/detail/${id}?bbsConfigFk=${universityBoardId(source)}`;
  if(source.kind==='computing')return `https://computing.sogang.ac.kr/ko/community/${source.id}/detail/${id}`;
+ if(source.kind==='engineering')return engineeringDetailUrl(source,id);
  known(source);const u=new URL(source.url);
  if(source.kind==='cms')return `${u.origin}/front/cmsboardview.do?bbsConfigFK=${u.searchParams.get('bbsConfigFK')}&siteId=${u.searchParams.get('siteId')}&pkid=${id}`;
  return `https://sc.sogang.ac.kr/bbs/bbsview.do?bbsid=${legacyBoardId(source)}&wslID=bdata&pkid=${id}`;

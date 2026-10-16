@@ -4,6 +4,7 @@ import {mealWindow,type MealSource} from './meal-cache.ts';
 import {todayKst} from './time.ts';
 import {ADDITIONAL_NOTICE_SOURCES,legacyNoticePageUrl,parseLegacyNoticePage} from './legacy-notice-sources.ts';
 import {UNIVERSITY_NOTICE_SOURCES,universityBoardId} from './university-notice-sources.ts';
+import {ENGINEERING_NOTICE_SOURCES,engineeringPageUrl,parseEngineeringNoticePage} from './engineering-notice-sources.ts';
 
 type Node = DefaultTreeAdapterMap['node'];
 const children = (n: Node): Node[] => 'childNodes' in n ? n.childNodes : [];
@@ -24,9 +25,10 @@ export const SOURCES: Source[] = [
  UNIVERSITY_NOTICE_SOURCES[0],
  ...[['academicNotice','소프트웨어융합대학 학사공지'],['graduateNotice','소프트웨어융합대학 대학원공지'],['externalInfo','소프트웨어융합대학 대외정보'],['news','소프트웨어융합대학 소식'],['career','소프트웨어융합대학 취업·인턴십']].map(([id,name]):Source => ({id,name,kind:'computing',url:`https://computing.sogang.ac.kr/ko/community/${id}/list?num=1`})),
  ...UNIVERSITY_NOTICE_SOURCES.slice(1),
- ...ADDITIONAL_NOTICE_SOURCES
+ ...ADDITIONAL_NOTICE_SOURCES,
+ ...ENGINEERING_NOTICE_SOURCES
 ];
-const hosts = new Set(['www.sogang.ac.kr','computing.sogang.ac.kr','scc.sogang.ac.kr','convedu.sogang.ac.kr','sc.sogang.ac.kr']);
+const hosts = new Set(['www.sogang.ac.kr','computing.sogang.ac.kr','scc.sogang.ac.kr','convedu.sogang.ac.kr','sc.sogang.ac.kr','eng.sogang.ac.kr']);
 let pacing: Promise<void> = Promise.resolve(); let lastStart = 0;
 async function pace(): Promise<void> {
  const next = pacing.then(async () => { const wait = Math.max(0,1000-(Date.now()-lastStart)); if (wait) await new Promise(r=>setTimeout(r,wait)); lastStart=Date.now(); });
@@ -95,7 +97,7 @@ export async function collectNotices(source:Source):Promise<Notice[]> {
  if(!SOURCES.some(s=>s.id===source.id&&s.url===source.url))throw new Error('Unknown source');
  if(source.kind==='university'){const r=await sourceBytes(source.url);if(!r.type.includes('json'))throw new Error('Expected JSON');return parseUniversity(JSON.parse(new TextDecoder().decode(r.bytes)),source);}
  const found=new Map<string,Notice>();const regular=new Set<string>();
- for(let page=1;page<=3;page++){const u=new URL(source.url);u.searchParams.set('num',String(page));const parsed=source.kind==='computing'?parseComputing(await html(u.href),source):parseLegacyNoticePage(await html(legacyNoticePageUrl(source,page)),source,page);
+ for(let page=1;page<=3;page++){const u=new URL(source.url);u.searchParams.set('num',String(page));const parsed=source.kind==='computing'?parseComputing(await html(u.href),source):source.kind==='engineering'?parseEngineeringNoticePage(await html(engineeringPageUrl(source,page)),source,page):parseLegacyNoticePage(await html(legacyNoticePageUrl(source,page)),source,page);
   for(const id of parsed.regularIds){if(regular.has(id))throw new Error('Overlapping regular pages');regular.add(id);}
   for(const n of parsed.notices){const old=found.get(n.id);if(old&&JSON.stringify(old)!==JSON.stringify(n))throw new Error('Conflicting repeated pin');found.set(n.id,n);}
   if('done'in parsed?parsed.done:parsed.regularCount<10)break;

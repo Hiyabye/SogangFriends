@@ -17,8 +17,8 @@ async function request(data:unknown,timestamp=String(Date.now()),key=secret) {
 function database(){const db=testDatabase();db.env.NOTICE_COLLECTION_MODE='external';db.env.NOTICE_INGEST_SECRET=secret;return db;}
 afterEach(()=>{vi.restoreAllMocks();vi.useRealTimers();});
 describe('authenticated notice ingestion',()=>{
- it('accepts all eighteen canonical sources and rejects foreign or cross-board links and duplicate IDs',()=>{
-  expect(SOURCES).toHaveLength(18);
+ it('accepts all twenty-two canonical sources and rejects foreign or cross-board links and duplicate IDs',()=>{
+  expect(SOURCES).toHaveLength(22);
   for(const s of SOURCES){
    expect(validateNoticeSnapshot({source:s.id,notices:[notice(s.id)]}).source).toBe(s.id);
    for(const other of SOURCES.filter(other=>other.id!==s.id))expect(()=>validateNoticeSnapshot({source:s.id,notices:[{...notice(s.id),url:notice(other.id).url}]})).toThrow();

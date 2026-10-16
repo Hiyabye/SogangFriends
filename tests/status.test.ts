@@ -41,9 +41,9 @@ describe('operational status and audit dispositions',()=>{
   expect(text).toContain('9001');for(const hidden of ['9002','9003','2002','secret-token'])expect(text).not.toContain(hidden);
  });
  it('shows only this guild institution channels in both normal and attachment responses',async()=>{
-  const first=['1559799050054799433','1559799078798495805','1559799123903909908','1559799151942959115','1559799178136264754'];
-  db.sqlite.prepare('INSERT INTO guilds(id,university_channel,computing_channel,swedu_channel,convedu_channel,bdata_channel,updated_at) VALUES(?,?,?,?,?,?,?)').run('111',...first,'now');
-  db.sqlite.prepare('INSERT INTO guilds(id,university_channel,computing_channel,swedu_channel,convedu_channel,bdata_channel,updated_at) VALUES(?,?,?,?,?,?,?)').run('222','other-university','other-computing','other-swedu','other-convedu','other-bdata','now');
+  const first=['1559799050054799433','1559799078798495805','1559799123903909908','1559799151942959115','1559799178136264754','1560465047128514640'];
+  db.sqlite.prepare('INSERT INTO guilds(id,university_channel,computing_channel,swedu_channel,convedu_channel,bdata_channel,engineering_channel,updated_at) VALUES(?,?,?,?,?,?,?,?)').run('111',...first,'now');
+  db.sqlite.prepare('INSERT INTO guilds(id,university_channel,computing_channel,swedu_channel,convedu_channel,bdata_channel,engineering_channel,updated_at) VALUES(?,?,?,?,?,?,?,?)').run('222','other-university','other-computing','other-swedu','other-convedu','other-bdata','other-engineering','now');
   for(const forceAttachment of [false,true]){
    if(forceAttachment)for(let i=0;i<40;i++)await failed(`settings-job-${i}`,`settings-kind-${i}`);
    const result=await operationalStatus(db.env,'111'),text=full(result);

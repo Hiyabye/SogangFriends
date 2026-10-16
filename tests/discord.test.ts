@@ -67,7 +67,7 @@ describe('Discord message safety', () => {
   });
   it('offers optional institution channels while retaining existing setup options',()=>{
     const setup=COMMANDS.find(c=>c.name==='setup')!;
-    expect(setup.options!.map(option=>option.name)).toEqual(['notices','university','computing','swedu','convedu','bdata','meals','schedule']);
+    expect(setup.options!.map(option=>option.name)).toEqual(['notices','university','computing','swedu','convedu','bdata','engineering','meals','schedule']);
     for(const option of setup.options!){
       expect(option).toMatchObject({type:7,channel_types:[0,5]});
       expect(option).not.toHaveProperty('required',true);

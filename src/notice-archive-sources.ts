@@ -6,6 +6,8 @@ import {validDate} from './time.ts';
 import {ARCHIVE_MAX_BODY_BYTES} from './notice-archive-limits.ts';
 import {noticeDetailUrl,legacyNoticePageUrl,parseLegacyNoticePage,parseLegacyNoticeRaw} from './legacy-notice-sources.ts';
 
+import {engineeringPageUrl,parseEngineeringNoticePage,parseEngineeringNoticeRaw} from './engineering-notice-sources.ts';
+
 type Node=DefaultTreeAdapterMap['node'];
 export interface NoticeRaw {notice:Notice;bodyHtml:string;attachments:string[];imageUrls:string[]}
 const headings:Record<string,string>={academicNotice:'학사 공지',graduateNotice:'대학원 공지',externalInfo:'대외정보',news:'소식',career:'취업·인턴십'};
@@ -32,6 +34,7 @@ function board(doc:Node,source:Source):Node{
 export function parseNoticePage(input:string,source:Source,page:number):{notices:Notice[];done:boolean}{
  sourceFor(source);if(!Number.isSafeInteger(page)||page<1)throw new Error('Invalid archive page');
  if(source.kind==='cms'||source.kind==='legacy'){const parsed=parseLegacyNoticePage(input,source,page);return {notices:parsed.notices,done:parsed.done};}
+ if(source.kind==='engineering'){const parsed=parseEngineeringNoticePage(input,source,page);return {notices:parsed.notices,done:parsed.done};}
  if(source.kind!=='computing')throw new Error('Invalid archive page');
  const doc=parse(input);const content=board(doc,source);const pagination=one(content,n=>cls(n,'board-pagination'));
  if(text(one(pagination,n=>tag(n,'button')&&attr(n,'aria-current')==='page'))!==String(page))throw new Error('Wrong archive page number');
@@ -46,7 +49,7 @@ export function parseNoticePage(input:string,source:Source,page:number):{notices
 }
 export async function collectNoticePage(source:Source,page:number):Promise<{notices:Notice[];done:boolean}>{
  sourceFor(source);if(!Number.isSafeInteger(page)||page<1)throw new Error('Invalid archive page');
- const u=new URL(source.kind==='cms'||source.kind==='legacy'?legacyNoticePageUrl(source,page):source.url);if(source.kind==='university'||source.kind==='computing')u.searchParams.set(source.kind==='university'?'pageNum':'num',String(page));
+ const u=new URL(source.kind==='engineering'?engineeringPageUrl(source,page):source.kind==='cms'||source.kind==='legacy'?legacyNoticePageUrl(source,page):source.url);if(source.kind==='university'||source.kind==='computing')u.searchParams.set(source.kind==='university'?'pageNum':'num',String(page));
  const response=await sourceBytes(u.href);const input=new TextDecoder('utf-8',{fatal:true}).decode(response.bytes);
  if(source.kind!=='university'){if(!response.type.includes('text/html'))throw new Error('Expected archive HTML');return parseNoticePage(input,source,page);}
  if(!response.type.includes('json'))throw new Error('Expected archive JSON');const data=JSON.parse(input);const notices=parseUniversity(data,source,page);
@@ -83,6 +86,7 @@ function hydration(input:string):{value:(token:string)=>unknown;object:(name:str
 }
 export function parseNoticeRaw(input:string|unknown,notice:Notice):NoticeRaw {
  const source=identity(notice);
+ if(source.kind==='engineering'){if(typeof input!=='string')throw new Error('Expected Engineering archive HTML');return {notice,...parseEngineeringNoticeRaw(input,source,notice)};}
  if(source.kind==='cms'||source.kind==='legacy'){if(typeof input!=='string')throw new Error('Expected legacy archive HTML');return {notice,...parseLegacyNoticeRaw(input,source,notice)};}
  if(source.kind==='university'){
   const response=input as {statusCode?:unknown;data?:Record<string,unknown>};const d=response?.data;
