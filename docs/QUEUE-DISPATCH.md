@@ -4,7 +4,8 @@
 
 Migration `0017_job_dispatch_lease.sql` adds nullable `jobs.dispatch_until` and was
 applied before deploying Worker `a78d19fc-2a5c-4c34-8019-72291f476e91` from
-`5a93604`. Production has migrations0001–0017, with none pending. Future rollouts
+`5a93604`. Production has migrations0001–0017. Local library live-board migration0018
+is pending separately; see [library contract](LIBRARY-BOARD.md). Future rollouts
 still need approval. Dispatch, execution claims and retry updates require this
 column; old explicit-column inserts remain compatible with the additive column.
 No baselines, job history, destinations or Discord messages were reset or replayed.

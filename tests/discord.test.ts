@@ -53,6 +53,14 @@ describe('Discord message safety', () => {
     expect(data.allowed_mentions).toEqual({ parse: [] });expect(data).not.toHaveProperty('flags');
     expect(message('plain text')).toEqual({ content: 'plain text', allowed_mentions: { parse: [] } });
   });
+  it('sends silent creation with the narrow notification flag while normal sends stay unchanged',async()=>{
+    const mock=vi.fn().mockImplementation(async()=>Response.json({id:'999',channel_id:'123'}));vi.stubGlobal('fetch',mock);
+    await discordSend(env,'123',{content:'초기 좌석 현황',suppressNotifications:true});
+    expect(JSON.parse(mock.mock.calls[0][1].body)).toEqual({content:'초기 좌석 현황',flags:4096,allowed_mentions:{parse:[]}});
+    await discordSend(env,'123',{content:'잔여 좌석 알림',suppressNotifications:false});
+    expect(JSON.parse(mock.mock.calls[1][1].body)).not.toHaveProperty('flags');
+    expect(message({content:'',components:[{type:10,content:'card'}],suppressNotifications:true}).flags).toBe(32768|4096);
+  });
   it('serializes attachment metadata without putting image bytes in JSON', () => {
     const data=message({content:'공식 메뉴표',file:{filename:'menu.png',bytes:new Uint8Array([1,2,3]),mime:'image/png'}});
     expect(data.attachments).toEqual([{id:0,filename:'menu.png'}]);expect(data.allowed_mentions.parse).toEqual([]);

@@ -201,7 +201,7 @@ describe('library delivery eligibility and ordinary durable sends',()=>{
  it('does not let a rate-limit retry send after the snapshot expires',async()=>{
   configure();db.env.DISCORD_TOKEN='fixture';const event=await opening();
   const api=vi.spyOn(globalThis,'fetch').mockResolvedValue(Response.json({retry_after:1},{status:429}));
-  await expect(executeJob(db.env,deliveryJob(event))).rejects.toThrow('Discord rate limited');
+  await expect(executeJob(db.env,deliveryJob(event))).rejects.toThrow('Library board write deferred');
   expect(db.sqlite.prepare('SELECT state FROM deliveries WHERE id=?').get(event)!.state).toBe('retry');
   tick(120_001);await executeJob(db.env,deliveryJob(event));expect(api).toHaveBeenCalledTimes(1);
   expect(db.sqlite.prepare('SELECT state FROM deliveries WHERE id=?').get(event)!.state).toBe('expired');
@@ -265,6 +265,29 @@ describe('library poll scheduling and health',()=>{
   await worker.scheduled({cron:'* 0-11 * * *',scheduledTime:Date.now()} as ScheduledController,db.env);
   expect(fetcher).not.toHaveBeenCalled();expect(count('jobs')).toBe(0);
   expect(db.sqlite.prepare('SELECT * FROM health').all()).toEqual([]);
+ });
+ it('closes the tracked status before ordinary Cron hits a Queue quota error',async()=>{
+  configure();db.env.DISCORD_TOKEN='fixture';db.env.NOTICE_COLLECTION_MODE='external';await observe(3);
+  db.sqlite.prepare('INSERT INTO library_messages(guild_id,channel_id,message_id,updated_at) VALUES(?,?,?,?)').run('111',channel,'100',iso());
+  db.sqlite.prepare("INSERT INTO jobs(id,kind,payload,created_at,available_at) VALUES('pending','collect','{}',?,?)").run(iso(),iso());
+  vi.setSystemTime(new Date('2026-10-16T13:00:00Z'));
+  const sourceFetch=vi.spyOn(source,'fetchLibrarySnapshot'),network=vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response('{}'));
+  vi.mocked(db.env.JOBS.send).mockRejectedValue(new Error('queue quota'));
+  vi.spyOn(console,'info').mockImplementation(()=>{});vi.spyOn(console,'error').mockImplementation(()=>{});
+  await expect(worker.scheduled({cron:'*/15 * * * *',scheduledTime:Date.now()} as ScheduledController,db.env)).rejects.toThrow('queue quota');
+  expect(sourceFetch).not.toHaveBeenCalled();expect(network).toHaveBeenCalledOnce();
+  expect(network.mock.calls[0][1]!.method).toBe('PATCH');
+  expect(JSON.parse(String(network.mock.calls[0][1]!.body)).content).toContain('좌석 확인 종료');
+  expect(db.sqlite.prepare("SELECT display_key FROM library_board_state").get()!.display_key).toContain('closed:2026-10-16:');
+ });
+ it('does not block ordinary planning when the closing PATCH fails',async()=>{
+  configure();db.env.DISCORD_TOKEN='fixture';db.env.NOTICE_COLLECTION_MODE='external';await observe(3);
+  db.sqlite.prepare('INSERT INTO library_messages(guild_id,channel_id,message_id,updated_at) VALUES(?,?,?,?)').run('111',channel,'100',iso());
+  vi.setSystemTime(new Date('2026-10-16T13:00:00Z'));
+  vi.spyOn(globalThis,'fetch').mockResolvedValue(new Response('',{status:403}));vi.spyOn(console,'info').mockImplementation(()=>{});
+  await worker.scheduled({cron:'*/15 * * * *',scheduledTime:Date.now()} as ScheduledController,db.env);
+  expect(db.sqlite.prepare("SELECT error FROM health WHERE id='cron'").get()!.error).toBeNull();
+  expect(db.sqlite.prepare("SELECT error FROM health WHERE id='library-board'").get()!.error).toContain('deferred');
  });
  it('preserves ordinary quarter-hour planning and does not fetch library data on that event',async()=>{
   configure();db.env.NOTICE_COLLECTION_MODE='external';const fetcher=vi.spyOn(source,'fetchLibrarySnapshot');

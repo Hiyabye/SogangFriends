@@ -11,6 +11,7 @@ import {handleMealOcr} from './meal-ocr';
 import {operationalStatus} from './status';
 import {NOTICE_CHANNEL_COLUMNS} from './notice-channels';
 import {LIBRARY_CRON,pollLibrary} from './library.ts';
+import {closeLibraryBoards} from './library-board.ts';
 const SETUP_CHANNEL_COLUMNS:Record<string,string>={notices:'notices_channel',meals:'meals_channel',schedule:'schedule_channel',library:'library_channel',...NOTICE_CHANNEL_COLUMNS};
 interface Interaction {id:string;application_id:string;token:string;type:number;guild_id?:string;member?:{permissions?:string};data?:{name:string;options?:{name:string;value:string}[]}}
 function reply(content:string,ephemeral=true) {return Response.json({type:4,data:{...message(content),...(ephemeral?{flags:64}:{})}});}
@@ -70,7 +71,7 @@ async function commandContent(env:Env,i:Interaction):Promise<DiscordMessageInput
  await env.DB.prepare('INSERT OR IGNORE INTO guilds(id,updated_at) VALUES(?,?)').bind(i.guild_id!,nowIso()).run();
  const statements=Object.entries(options).map(([key,value])=>env.DB.prepare(`UPDATE guilds SET ${SETUP_CHANNEL_COLUMNS[key]}=?,updated_at=? WHERE id=?`).bind(value,nowIso(),i.guild_id!));
  await env.DB.batch(statements);
- return '채널을 연결했습니다. 기관별 공지는 지정한 전용 채널로만 보내며, 미설정 기관은 notices 채널을 사용합니다. 과거 공지를 재발송하거나 수집 기준을 초기화하지 않습니다. 식단·학사 일정 알림은 지정한 일일 시간대에만 발송합니다. library는 매일 10–22시 KST에 인벤툼 II 알림 대상 96석의 만석→잔여 좌석 전환만 알립니다. 장애인석 1·3·44·85번과 리클라이너석 101·102번은 제외합니다. 첫 확인은 조용히 시작합니다.';
+ return '채널을 연결했습니다. 기관별 공지는 지정한 전용 채널로만 보내며, 미설정 기관은 notices 채널을 사용합니다. 과거 공지를 재발송하거나 수집 기준을 초기화하지 않습니다. 식단·학사 일정 알림은 지정한 일일 시간대에만 발송합니다. library는 매일 10–22시 KST에 인벤툼 II 알림 대상 96석의 현황을 1분마다 기존 메시지에 갱신합니다. 만석→잔여 좌석 전환 시에만 새 알림을 보내고 이전 메시지를 삭제합니다. 초기 메시지는 푸시 알림을 억제하며, 22시에는 운영 종료를 표시합니다. 장애인석 1·3·44·85번과 리클라이너석 101·102번은 제외합니다.';
  }
  case 'status': {
  if(!authorized(i,env)) return '서버 관리 권한이 필요합니다.';
@@ -104,6 +105,11 @@ export default {
   if(event.cron===LIBRARY_CRON){await pollLibrary(env,event.scheduledTime);return;}
   // Trigger changes can take time to propagate; an old library tick is not ordinary quarter-hour work.
   if(event.cron==='* 0-11 * * *')return;
+  // Status closure must still work when unrelated Queue dispatch is unavailable.
+  try{await closeLibraryBoards(env,event.scheduledTime);}
+  catch{
+   await env.DB.prepare("INSERT INTO health(id,last_attempt,error) VALUES('library-board',?,'Library closing update deferred') ON CONFLICT(id) DO UPDATE SET last_attempt=excluded.last_attempt,error=excluded.error").bind(nowIso()).run();
+  }
   const at=nowIso();
   console.info('Cron planning started',event.scheduledTime);
   try {

@@ -7,7 +7,8 @@ import {batchNoticeCards,noticeCardMessage} from './notice-card';
 import { addDays, todayKst, validDate } from './time';
 import {boardHash,cleanupMealMessage,updateBoard} from './message-board';
 import {mealCard} from './meal-card';
-import {cleanupLibraryMessage,libraryDeliveryCurrent,recordLibraryMessage} from './library.ts';
+import {cleanupLibraryMessage} from './library.ts';
+import {sendLibraryOpening} from './library-board.ts';
 import { validateSchedules } from './schedule';
 import { updateScheduleSummary } from './schedule-summary';
 import { claim, deliveryIntent, deliveryIntentStatements, dispatch, enqueue, nowIso, recover, retryJob, saveNotices, sourceFailure } from './storage';
@@ -248,6 +249,7 @@ export async function executeJob(env:Env,job:Job) {
  break;
  }
  case 'deliver': {
+ if(Object.hasOwn(payload,'libraryEvent')){await sendLibraryOpening(env,payload.deliveryId,payload.libraryEvent);break;}
  await env.DB.prepare("UPDATE deliveries SET state='expired',updated_at=? WHERE id=? AND state IN ('pending','retry') AND expires_at<=?").bind(nowIso(),payload.deliveryId,nowIso()).run();
  const row=await env.DB.prepare("UPDATE deliveries SET state='sending',updated_at=? WHERE id=? AND state IN ('pending','retry') RETURNING *").bind(nowIso(),payload.deliveryId).first<{guild_id:string;channel_id:string;content:string;expires_at:string}>();
  if(!row) break;
@@ -255,9 +257,6 @@ export async function executeJob(env:Env,job:Job) {
  // Keep file bytes transient; the durable intent carries only the meal date/slot.
  let content:DiscordMessageInput;
  try{
- if(Object.hasOwn(payload,'libraryEvent')&&!await libraryDeliveryCurrent(env,row.guild_id,row.channel_id,payload.libraryEvent)){
-  await env.DB.prepare("UPDATE deliveries SET state='expired',updated_at=? WHERE id=? AND state='sending'").bind(nowIso(),payload.deliveryId).run();break;
- }
  content=payload.mealDate&&payload.mealSlot?await mealReportResponse(env,payload.mealDate,payload.mealSlot):payload.mealDate?await mealCommandResponse(env,payload.mealDate):payload.noticeCard?noticeCardMessage(payload.noticeCard):row.content;}
  catch(error){
   // No Discord POST has started: release only this definite pre-send failure for safe retry.
@@ -268,12 +267,7 @@ export async function executeJob(env:Env,job:Job) {
  await env.DB.prepare("UPDATE deliveries SET state='expired',updated_at=? WHERE id=? AND state='sending'").bind(nowIso(),payload.deliveryId).run();break;
  }
  const result=await discordSend(env,row.channel_id,content);
- if(result.state==='sent'&&Object.hasOwn(payload,'libraryEvent')){
-  if(!result.messageId)throw new Error('Library send missing confirmed message ID');
-  await recordLibraryMessage(env,row.guild_id,row.channel_id,result.messageId,payload.deliveryId);
- }else{
-  await env.DB.prepare('UPDATE deliveries SET state=?,message_id=?,updated_at=?,error=? WHERE id=?').bind(result.state,result.messageId??null,nowIso(),result.state==='sent'?null:result.state,payload.deliveryId).run();
- }
+ await env.DB.prepare('UPDATE deliveries SET state=?,message_id=?,updated_at=?,error=? WHERE id=?').bind(result.state,result.messageId??null,nowIso(),result.state==='sent'?null:result.state,payload.deliveryId).run();
  if(result.state==='retry') {const error=new Error('Discord rate limited') as Error&{retryAfter:number};error.retryAfter=result.retryAfter??60;throw error;}
  break;
  }

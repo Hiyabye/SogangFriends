@@ -3,6 +3,7 @@ import {allowedGuild} from './discord.ts';
 import {dispatch,nowIso} from './storage.ts';
 import {todayKst} from './time.ts';
 import {fetchLibrarySnapshot,LIBRARY_URL,type LibrarySnapshot} from './library-source.ts';
+import {updateLibraryBoards} from './library-board.ts';
 
 export const LIBRARY_CRON='* 1-12 * * *'; // 10:00–21:59 KST; ordinary Cron is unchanged.
 export const LIBRARY_SEAT_POLICY='room5-exclude-1-3-44-85-101-102-v1';
@@ -59,9 +60,11 @@ export async function libraryDeliveryCurrent(env:Env,guild:string,channel:string
 }
 
 /** Commit confirmed POST tracking and cleanup intent together, before any DELETE. */
-export async function recordLibraryMessage(env:Env,guild:string,channel:string,messageId:string,deliveryId:string):Promise<void> {
+export async function recordLibraryMessage(env:Env,guild:string,channel:string,messageId:string,deliveryId:string,writer?:{owner:string;key:string}):Promise<void> {
  if(![guild,channel,messageId].every(value=>/^\d+$/.test(value))||!deliveryId.startsWith(`library:${guild}:`))throw new Error('Invalid library delivery identity');
  const at=nowIso();
+ const fence=" AND (? IS NULL OR EXISTS(SELECT 1 FROM library_board_state WHERE guild_id=? AND channel_id=? AND lease_owner=? AND lease_until>?))";
+ const proof=[writer?.owner??null,guild,channel,writer?.owner??null,at];
  // Gate every statement on the still-sending delivery. Repeated completion cannot adopt an
  // older message after a subsequent alert has already replaced it.
  const results=await env.DB.batch([
@@ -69,14 +72,16 @@ export async function recordLibraryMessage(env:Env,guild:string,channel:string,m
    SELECT 'library-cleanup:'||m.guild_id||':'||m.channel_id||':'||m.message_id,'library-cleanup',
     json_object('guild',m.guild_id,'channel',m.channel_id,'messageId',m.message_id,'replacementId',?),?,?
    FROM library_messages m JOIN deliveries d ON d.guild_id=m.guild_id AND d.channel_id=m.channel_id
-   WHERE d.id=? AND d.guild_id=? AND d.channel_id=? AND d.state='sending' AND m.message_id!=?`)
-   .bind(messageId,at,at,deliveryId,guild,channel,messageId),
+   WHERE d.id=? AND d.guild_id=? AND d.channel_id=? AND d.state='sending' AND m.message_id!=?${fence}`)
+   .bind(messageId,at,at,deliveryId,guild,channel,messageId,...proof),
   env.DB.prepare(`INSERT INTO library_messages(guild_id,channel_id,message_id,updated_at)
-   SELECT guild_id,channel_id,?,? FROM deliveries WHERE id=? AND guild_id=? AND channel_id=? AND state='sending'
+   SELECT guild_id,channel_id,?,? FROM deliveries WHERE id=? AND guild_id=? AND channel_id=? AND state='sending'${fence}
    ON CONFLICT(guild_id,channel_id) DO UPDATE SET message_id=excluded.message_id,updated_at=excluded.updated_at`)
-   .bind(messageId,at,deliveryId,guild,channel),
-  env.DB.prepare("UPDATE deliveries SET state='sent',message_id=?,updated_at=?,error=NULL WHERE id=? AND guild_id=? AND channel_id=? AND state='sending'")
-   .bind(messageId,at,deliveryId,guild,channel),
+   .bind(messageId,at,deliveryId,guild,channel,...proof),
+  env.DB.prepare("UPDATE deliveries SET state='sent',message_id=?,updated_at=?,error=NULL WHERE id=? AND guild_id=? AND channel_id=? AND state='sending'"+fence)
+   .bind(messageId,at,deliveryId,guild,channel,...proof),
+  ...(writer?[env.DB.prepare("UPDATE library_board_state SET lease_owner=NULL,lease_until=NULL,operation=NULL,post_state=NULL,post_delivery_id=NULL,retry_at=NULL,error=NULL,display_key=?,updated_at=? WHERE guild_id=? AND channel_id=? AND lease_owner=? AND EXISTS(SELECT 1 FROM deliveries WHERE id=? AND state='sent' AND message_id=?)")
+   .bind(writer.key,at,guild,channel,writer.owner,deliveryId,messageId)]:[]),
  ]);
  if(results[2].meta.changes===0){
   const confirmed=await env.DB.prepare("SELECT id FROM deliveries WHERE id=? AND guild_id=? AND channel_id=? AND state='sent' AND message_id=?")
@@ -123,5 +128,7 @@ export async function pollLibrary(env:Env,scheduledTime:number):Promise<void> {
   // The next minute is a new observation, never a replay of this failed poll.
   return;
  }
+ // Display reconciliation must not depend on Queue availability or contaminate source health.
+ await updateLibraryBoards(env);
  await dispatch(env);
 }

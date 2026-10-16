@@ -207,6 +207,13 @@ describe('interaction and durable integration',()=>{
  const body=JSON.parse(fetchMock.mock.calls[0][1]!.body as string);
  expect(body.content).toContain('1111');expect(body.content).not.toContain('2222');expect(body.allowed_mentions.parse).toEqual([]);
  }finally{db.close();}});
+ it('includes only the current guild and route library writer diagnostics in status',async()=>{
+ const db=testDatabase();try{
+ db.sqlite.exec("INSERT INTO guilds(id,library_channel,updated_at) VALUES('111','1001','now'),('222','2002','now'); INSERT INTO library_board_state(guild_id,channel_id,post_state,error,updated_at) VALUES('111','1001','uncertain','current-route-quarantine','now'),('111','1002',NULL,'old-route-private','now'),('222','2002',NULL,'other-guild-private','now')");
+ const {operationalStatus}=await import('../src/status');const result=await operationalStatus(db.env,'111');
+ const text=typeof result==='string'?result:result.file?new TextDecoder().decode(result.file.bytes):result.content;
+ expect(text).toContain('current-route-quarantine');expect(text).toContain('uncertain');expect(text).not.toContain('old-route-private');expect(text).not.toContain('other-guild-private');
+ }finally{db.close();}});
  it.each([undefined,'2026-10-12'])('serves the stored validated meal for date %s through a signed deferred interaction without inference',async(date)=>{
  const db=testDatabase();try{
  vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(new Date('2026-10-13T15:30:00Z'));
