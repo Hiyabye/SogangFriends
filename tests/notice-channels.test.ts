@@ -19,7 +19,7 @@ describe('institution notice routing',()=>{
  });
  it('routes all catalog sources exclusively to their group, including a guild without fallback',async()=>{
   vi.useFakeTimers();vi.setSystemTime(new Date('2026-10-13T01:00:00Z'));const db=testDatabase();try{
-   db.sqlite.prepare("INSERT INTO guilds(id,notices_channel,university_channel,computing_channel,swedu_channel,convedu_channel,bdata_channel,engineering_channel,updated_at) VALUES('111','999','101','102','103','104','105','106','fixture'),('333','999','101','102','103','104','105','106','fixture')").run();
+   db.sqlite.prepare("INSERT INTO guilds(id,notices_channel,university_channel,computing_channel,swedu_channel,convedu_channel,bdata_channel,engineering_channel,psychology_channel,business_channel,updated_at) VALUES('111','999','101','102','103','104','105','106','107','108','fixture'),('333','999','101','102','103','104','105','106','107','108','fixture')").run();
    db.sqlite.prepare("UPDATE guilds SET notices_channel=NULL WHERE id='111'").run();
    await executeJob(db.env,job);await executeJob(db.env,job);
    const deliveries=db.sqlite.prepare('SELECT channel_id,content FROM deliveries ORDER BY channel_id').all();expect(deliveries).toHaveLength(NOTICE_GROUPS.length);
@@ -47,7 +47,7 @@ describe('institution notice routing',()=>{
    expect(db.sqlite.prepare('SELECT id FROM deliveries ORDER BY id').all()).toEqual(batchNoticeCards(notices).map((_,index)=>({id:`notice-alert:routing:111:${index}`})));
    db.sqlite.prepare("UPDATE deliveries SET state='uncertain'").run();
    const before=db.sqlite.prepare('SELECT * FROM deliveries').all();const jobs=db.sqlite.prepare('SELECT * FROM jobs').all();
-   db.sqlite.prepare("UPDATE guilds SET university_channel='101',computing_channel='102',swedu_channel='103',convedu_channel='104',bdata_channel='105',engineering_channel='106'").run();
+   db.sqlite.prepare("UPDATE guilds SET university_channel='101',computing_channel='102',swedu_channel='103',convedu_channel='104',bdata_channel='105',engineering_channel='106',psychology_channel='107',business_channel='108'").run();
    await executeJob(db.env,job);
    expect(db.sqlite.prepare('SELECT * FROM deliveries').all()).toEqual(before);expect(db.sqlite.prepare('SELECT * FROM jobs').all()).toEqual(jobs);
   }finally{db.close();}
@@ -89,7 +89,10 @@ describe('institution notice routing',()=>{
    db.sqlite.exec("CREATE TRIGGER reject_destination BEFORE INSERT ON deliveries WHEN NEW.channel_id='102' BEGIN SELECT RAISE(ABORT,'fixture failure'); END;");
    await expect(executeJob(db.env,job)).rejects.toThrow('fixture failure');
    expect(db.sqlite.prepare('SELECT COUNT(*) n FROM deliveries').get()!.n).toBe(0);expect(db.sqlite.prepare('SELECT COUNT(*) n FROM jobs').get()!.n).toBe(0);
-   db.sqlite.exec('DROP TRIGGER reject_destination');await executeJob(db.env,job);expect(db.sqlite.prepare('SELECT COUNT(*) n FROM deliveries').get()!.n).toBe(2);
+   db.sqlite.exec('DROP TRIGGER reject_destination');await executeJob(db.env,job);
+   const computing=notices.filter(n=>noticeChannelColumn(n.source)==='computing_channel');
+   const fallback=notices.filter(n=>noticeChannelColumn(n.source)!=='computing_channel');
+   expect(db.sqlite.prepare('SELECT COUNT(*) n FROM deliveries').get()!.n).toBe(batchNoticeCards(computing).length+batchNoticeCards(fallback).length);
   }finally{db.close();}
  });
  it('skips unconfigured groups and expired alerts without creating delivery jobs',async()=>{

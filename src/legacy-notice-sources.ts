@@ -3,6 +3,7 @@ import type {Notice,Source} from './types';
 import {validDate} from './time.ts';
 import {universityBoardId} from './university-notice-sources.ts';
 import {engineeringDetailUrl} from './engineering-notice-sources.ts';
+import {businessDetailUrl} from './business-notice-sources.ts';
 
 type Node=DefaultTreeAdapterMap['node'];
 const attr=(n:Node,key:string)=>'attrs'in n?n.attrs.find(a=>a.name===key)?.value??'':'';
@@ -21,7 +22,8 @@ export const ADDITIONAL_NOTICE_SOURCES:Source[]=[
  {id:'conveduNotice',name:'융합교육원 공지사항',kind:'cms',url:'https://convedu.sogang.ac.kr/front/cmsboardlist.do?siteId=convedu&bbsConfigFK=5551'},
  {id:'conveduNews',name:'융합교육원 센터소식',kind:'cms',url:'https://convedu.sogang.ac.kr/front/cmsboardlist.do?siteId=convedu&bbsConfigFK=5550'},
  {id:'bdataNotice',name:'빅데이터 융복합 인재양성사업단 공지사항',kind:'legacy',url:'https://sc.sogang.ac.kr/bdata/4305.html'},
- {id:'bdataNews',name:'빅데이터 융복합 인재양성사업단 News',kind:'legacy',url:'https://sc.sogang.ac.kr/bdata/4306.html'}
+ {id:'bdataNews',name:'빅데이터 융복합 인재양성사업단 News',kind:'legacy',url:'https://sc.sogang.ac.kr/bdata/4306.html'},
+ {id:'psychologyNotice',name:'심리학과 공지사항',kind:'cms',url:'https://psychology.sogang.ac.kr/front/cmsboardlist.do?siteId=psychology&bbsConfigFK=1002'}
 ];
 const legacyBoardId=(source:Source)=>source.id==='bdataNews'?'5255':'5256';
 function known(source:Source):void{if(!ADDITIONAL_NOTICE_SOURCES.some(s=>s.id===source.id&&s.kind===source.kind&&s.url===source.url))throw new Error('Unknown legacy notice source');}
@@ -30,6 +32,7 @@ export function noticeDetailUrl(source:Source,id:string):string{
  if(source.kind==='university')return `https://www.sogang.ac.kr/ko/detail/${id}?bbsConfigFk=${universityBoardId(source)}`;
  if(source.kind==='computing')return `https://computing.sogang.ac.kr/ko/community/${source.id}/detail/${id}`;
  if(source.kind==='engineering')return engineeringDetailUrl(source,id);
+ if(source.kind==='business')return businessDetailUrl(source,id);
  known(source);const u=new URL(source.url);
  if(source.kind==='cms')return `${u.origin}/front/cmsboardview.do?bbsConfigFK=${u.searchParams.get('bbsConfigFK')}&siteId=${u.searchParams.get('siteId')}&pkid=${id}`;
  return `https://sc.sogang.ac.kr/bbs/bbsview.do?bbsid=${legacyBoardId(source)}&wslID=bdata&pkid=${id}`;

@@ -54,6 +54,25 @@ Deployed migration `0012_engineering_channel.sql` adds nullable `guilds.engineer
 
 This expansion required schema and command-definition changes: migration0012 preceded Worker deployment, then guild command registration and channel validation/configuration preceded collector push. The five known guild commands were replaced and read back; the empty global scope was untouched. No historical backfill was started/dispatched. Future external changes require fresh approval. New Engineering Discord delivery and visual rendering remain unverified; silent baselines are not delivery proof.
 
+## Psychology and Business expansion — local only
+
+The locally implemented catalog has24 sources across eight routes; production remains at22/six until a separately approved rollout. No external mutations are authorized by the local implementation approval.
+
+| Source | Official list | Route | Intended destination (unverified) |
+|---|---|---|---|
+| `psychologyNotice` | <https://psychology.sogang.ac.kr/front/cmsboardlist.do?siteId=psychology&bbsConfigFK=1002> | `psychology` | `1560644512672649309` |
+| `businessNotice` | <https://sbs.sogang.ac.kr/bbs/sbs/649/artclList.do> | `business` | `1560644541982445680` |
+
+Psychology reuses the strict CMS parser. The supplied Business wrapper `/sbs/2088/subview.do?enc=...` resolves board649; direct official list/article endpoints are used as canonical identities, not the wrapper. This source is 경영대학 학부 공지사항, routed under the requested 경영학과 name. No other Business boards are included.
+
+`src/business-notice-sources.ts` binds list/detail `og:url`, form actions and article links to SBS board649. Lists have ten regular rows/page; pins repeat across pages and can also occur in the regular rows. Matching duplicates are deduplicated, conflicting metadata rejects. Total count, contiguous regular ordinals and current/total/next/last pagination jointly prove EOF. Details verify title/date and preserve exact `.viewCont .txt` inner HTML. Explicit attachment URLs must use board649's download endpoint; attachment IDs differ from article IDs. Empty or malformed pages never imply EOF. No attachment/image binaries are downloaded.
+
+Read-only native Node checks through the integrated collector returned32 Psychology and34 Business recent notices, with an original detail parsed for each. Business pages1/2/36 and one detail were also checked against official HTML. These observations do not establish full-history capacity, live baselines, channel permissions or Discord delivery.
+
+Pending migration `0016_department_channels.sql` adds nullable Psychology/Business channel columns; local `/setup` definitions expose both options. Production already has migrations0001–0015 and the latest library Worker documented in [AGENTS.md](../AGENTS.md#current-deployment-boundary--do-not-bypass); older Engineering-specific deployment details below are historical.
+
+For a future approved rollout: inspect/apply migration0016 before Worker deployment, then register guild commands and validate/configure both destinations before pushing the collector catalog. Confirm the six existing routes, meal/schedule/library settings and NULL fallback unchanged. Initial uploaded snapshots must create silent baselines; distinguish acceptance from completed jobs and verified state. Do not replay old notices, dispatch backfill or send test messages without separate approval.
+
 ## Deferred scope: Convergence Education subsidiary programs
 
 The user explicitly deferred subsidiary-program sites; do not add them automatically to the `convedu` route. Candidates found through official program links include Big Data Science (`bds`,2067), Convergence Software (`csw`,1343), Artificial Intelligence (`aix`,2066), and Digital Humanities (`digihum`,5590). Their separate public notice lists were verified read-only. Other program menus also expose boards; a future expansion needs a fresh scope/ownership review, source verification and approval. Application/Q&A boards are not notice feeds by default. Only the parent site's center news5550 is included in this expansion.

@@ -61,7 +61,7 @@ async function commandContent(env:Env,i:Interaction):Promise<DiscordMessageInput
  }
  case 'setup': {
  if(!authorized(i,env)) return '서버 관리 권한이 필요합니다.';
- if(!Object.keys(options).length) return '채널 옵션 notices, university, computing, swedu, convedu, bdata, engineering, meals, schedule, library 중 하나 이상을 지정하세요.';
+ if(!Object.keys(options).length) return '채널 옵션 notices, university, computing, swedu, convedu, bdata, engineering, psychology, business, meals, schedule, library 중 하나 이상을 지정하세요.';
  for(const [key,value] of Object.entries(options)){
  if(!Object.hasOwn(SETUP_CHANNEL_COLUMNS,key)) return '잘못된 채널 설정입니다.';
  try{await validateChannel(env,i.guild_id!,value);}catch(error){return error instanceof Error?error.message:'채널 권한 확인 실패';}

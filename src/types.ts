@@ -8,7 +8,7 @@ export interface Env {
  NOTICE_ARCHIVE_ENABLED?: string;
 }
 export interface Notice {id:string; source:string; title:string; published:string; url:string}
-export interface Source {id:string; name:string; url:string; kind:'university'|'computing'|'cms'|'legacy'|'engineering'}
+export interface Source {id:string; name:string; url:string; kind:'university'|'computing'|'cms'|'legacy'|'engineering'|'business'}
 export interface Offering {status:'available'|'closed'|'unknown'; items:string[]; time:string|null; evidence:string}
 export interface MealDay {date:string; weekday:number; breakfastKorean:Offering; breakfastWestern:Offering; breakfastCommon:Offering; cupRice:Offering; dinner:Offering; drinks:Offering}
 export interface MealWeek {start:string; end:string; certain:boolean; days:MealDay[]}

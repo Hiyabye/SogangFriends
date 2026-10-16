@@ -18,7 +18,7 @@ async function signed(env:any,body:any) {
 }
 const interaction=(name:string,guild='111',permissions='32')=>({id:'123',application_id:'777',token:'secret-webhook',type:2,guild_id:guild,member:{permissions,user:{id:'private-user'}},data:{name}});
 describe('institution notice channel setup',()=>{
- const channels={university:'1559799050054799433',computing:'1559799078798495805',swedu:'1559799123903909908',convedu:'1559799151942959115',bdata:'1559799178136264754',engineering:'1560465047128514640'};
+ const channels={university:'1559799050054799433',computing:'1559799078798495805',swedu:'1559799123903909908',convedu:'1559799151942959115',bdata:'1559799178136264754',engineering:'1560465047128514640',psychology:'1560644512672649309',business:'1560644541982445680'};
  function discordApi(rejected?:string,denied?:string){
   return vi.spyOn(globalThis,'fetch').mockImplementation(async(input,init)=>{
    const url=String(input);
@@ -31,7 +31,7 @@ describe('institution notice channel setup',()=>{
   });
  }
  const setup=(options:Record<string,string>)=>({...interaction('setup'),data:{name:'setup',options:Object.entries(options).map(([name,value])=>({name,value}))}});
- it('privately configures all six supplied channels without creating deliveries or changing baselines',async()=>{
+ it('privately configures all eight supplied channels without creating deliveries or changing baselines',async()=>{
   const db=testDatabase();try{
    db.env.DISCORD_TOKEN='fixture';const api=discordApi();
    await saveNotices(db.env,'university',[],new Date().toISOString());
@@ -64,9 +64,17 @@ describe('institution notice channel setup',()=>{
    expect(db.sqlite.prepare("SELECT * FROM guilds WHERE id='111'").get()).toMatchObject({notices_channel:null,university_channel:'101',computing_channel:'102',swedu_channel:'103',convedu_channel:'104',bdata_channel:'105',engineering_channel:channels.engineering});
   }finally{db.close();}
  });
+ it('sets both department routes without changing existing routes, library or NULL fallback',async()=>{
+  const db=testDatabase();try{
+   db.env.DISCORD_TOKEN='fixture';discordApi();
+   db.sqlite.exec("INSERT INTO guilds(id,university_channel,computing_channel,swedu_channel,convedu_channel,bdata_channel,engineering_channel,meals_channel,schedule_channel,library_channel,updated_at) VALUES('111','101','102','103','104','105','106','200','300','400','before')");
+   await completeInteraction(db.env,{payload:JSON.stringify({interaction:setup({psychology:channels.psychology,business:channels.business}),expires:Date.now()+60000})} as any);
+   expect(db.sqlite.prepare("SELECT * FROM guilds WHERE id='111'").get()).toMatchObject({notices_channel:null,university_channel:'101',computing_channel:'102',swedu_channel:'103',convedu_channel:'104',bdata_channel:'105',engineering_channel:'106',meals_channel:'200',schedule_channel:'300',library_channel:'400',psychology_channel:channels.psychology,business_channel:channels.business});
+  }finally{db.close();}
+ });
  it.each([false,true])('validates every supplied channel before writes (existing guild: %s)',async(existing)=>{
   const db=testDatabase();try{
-   db.env.DISCORD_TOKEN='fixture';const api=discordApi(channels.engineering);
+   db.env.DISCORD_TOKEN='fixture';const api=discordApi(channels.business);
    if(existing)db.sqlite.exec("INSERT INTO guilds(id,notices_channel,updated_at) VALUES('111','100','before')");
    const before=db.sqlite.prepare('SELECT * FROM guilds').all();
    await completeInteraction(db.env,{payload:JSON.stringify({interaction:setup(channels),expires:Date.now()+60000})} as any);
@@ -75,9 +83,9 @@ describe('institution notice channel setup',()=>{
    expect(JSON.parse(patch[1]!.body as string).content).toContain('이 서버에 속한 채널');
   }finally{db.close();}
  });
- it('rejects an Engineering channel without effective Send Messages permission before writing settings',async()=>{
+ it.each(['engineering','psychology','business'] as const)('rejects a %s channel without effective Send Messages permission before writing settings',async(group)=>{
   const db=testDatabase();try{
-   db.env.DISCORD_TOKEN='fixture';const api=discordApi(undefined,channels.engineering);
+   db.env.DISCORD_TOKEN='fixture';const api=discordApi(undefined,channels[group]);
    db.sqlite.exec("INSERT INTO guilds(id,notices_channel,updated_at) VALUES('111','100','before')");
    const before=db.sqlite.prepare('SELECT * FROM guilds').all();
    await completeInteraction(db.env,{payload:JSON.stringify({interaction:setup(channels),expires:Date.now()+60000})} as any);
