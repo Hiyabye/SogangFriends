@@ -12,6 +12,22 @@ Worker `def0ee15-1925-4be8-b403-9c0344c28f3f` from `70765fb` and pushing main on
 Future external actions still need approval. Live minute editing, bootstrap,
 opening replacement and operating boundaries await natural scheduled verification.
 
+## Notice-style cards — local change, deployment pending
+
+`src/library-card.ts` presents the same durable text in a Components V2 container
+(type17, accent0x5865f2), with a heading and official-source link, matching notice
+cards. Bootstrap POST combines32768 with4096; opening POST uses32768 without
+notification suppression. PATCH sets32768, clears legacy `content:null`, embeds
+and attachments, and never sets the notification-suppression flag. Existing
+tracked text messages upgrade in place, with no extra POST, history adoption or
+schema change. The `card-v1:` display-key prefix forces conversion even if the
+last closed observation is unchanged; subsequent closed updates stay idempotent.
+
+Discord's V2 flag cannot be removed from an upgraded message. A future rollback
+must retain a V2-compatible writer for those IDs rather than PATCH legacy text.
+See the official [Edit Message contract](https://docs.discord.com/developers/resources/message#edit-message).
+This presentation change is local only; production remains the version above.
+
 ## User-visible behavior
 
 - One shared official detail-page fetch each minute,10:00–21:59 KST. Keep the
@@ -55,7 +71,7 @@ Discord; this is bounded arbitration, not a distributed transaction guarantee.
 Known-message PATCH is safely retryable. Store429 cooldown and reconcile the
 latest projection on a later tick; do not replay historic PATCH jobs. Permission
 or generic rejection gets a15-minute cooldown. PATCH replaces embed/attachment
-sets and does not try to modify notification flags.
+sets and does not try to modify notification-suppression flags.
 
 Only exact numeric Discord10008 proves the tracked message is gone and permits
 guarded removal of that ID and silent recreation during daytime. Other404/403

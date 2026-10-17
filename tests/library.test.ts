@@ -178,9 +178,10 @@ describe('library delivery eligibility and ordinary durable sends',()=>{
   await consume(db.env,{messages:[msg]} as unknown as MessageBatch<{id:string}>);
   expect(api).toHaveBeenCalledTimes(1);expect(api.mock.calls[0][0]).toBe(`https://discord.com/api/v10/channels/${channel}/messages`);
   const body=JSON.parse(api.mock.calls[0][1]!.body as string);
-  expect(body).toMatchObject({allowed_mentions:{parse:[]}});expect(body.content).toContain('알림 대상 96석 중 잔여 2석');
-  expect(body.content).toContain('장애인석 1·3·44·85번과 리클라이너석 101·102번은 제외했습니다.');
-  expect(body.content).toContain('roomview5.asp?room_no=5');
+  expect(body).toMatchObject({flags:32768,allowed_mentions:{parse:[]}});const text=body.components[0].components[0].content;
+  expect(text).toContain('알림 대상 96석 중 잔여 2석');
+  expect(text).toContain('장애인석 1·3·44·85번과 리클라이너석 101·102번은 제외했습니다.');
+  expect(text).toContain('roomview5.asp?room_no=5');
   expect(db.sqlite.prepare('SELECT state,message_id FROM deliveries WHERE id=?').get(event)).toMatchObject({state:'sent',message_id:'98765'});
   expect(deliveryJob(event).state).toBe('done');
  });
@@ -277,7 +278,7 @@ describe('library poll scheduling and health',()=>{
   await expect(worker.scheduled({cron:'*/15 * * * *',scheduledTime:Date.now()} as ScheduledController,db.env)).rejects.toThrow('queue quota');
   expect(sourceFetch).not.toHaveBeenCalled();expect(network).toHaveBeenCalledOnce();
   expect(network.mock.calls[0][1]!.method).toBe('PATCH');
-  expect(JSON.parse(String(network.mock.calls[0][1]!.body)).content).toContain('좌석 확인 종료');
+  expect(JSON.parse(String(network.mock.calls[0][1]!.body)).components[0].components[0].content).toContain('좌석 확인 종료');
   expect(db.sqlite.prepare("SELECT display_key FROM library_board_state").get()!.display_key).toContain('closed:2026-10-16:');
  });
  it('does not block ordinary planning when the closing PATCH fails',async()=>{

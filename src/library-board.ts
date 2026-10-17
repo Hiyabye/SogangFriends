@@ -3,6 +3,7 @@ import {allowedGuild,discordSend,message} from './discord.ts';
 import {nowIso} from './storage.ts';
 import {addDays,todayKst} from './time.ts';
 import {LIBRARY_URL} from './library-source.ts';
+import {libraryCard} from './library-card.ts';
 import {LIBRARY_SEAT_POLICY,libraryWindow,recordLibraryMessage} from './library.ts';
 
 const LEASE_MS=120_000,FRESH_MS=120_000;
@@ -41,7 +42,7 @@ async function projection(env:Env,guild:string,channel:string):Promise<Projectio
  const key=closed?`closed:${closedDay}:${watch?.source_at??'none'}`:`open:${watch!.day}:${watch!.source_at}:${watch!.remaining}`;
  const count=watch?`${closed?'마지막 확인: ':''}알림 대상 96석 중 잔여 ${watch.remaining}석\n확인 시각: ${sourceTime(watch.source_at)}`:'마지막으로 확인한 좌석 정보가 없습니다.';
  const content=`133 로욜라 인벤툼 II 좌석 현황\n${closed?'좌석 확인 종료\n':''}${count}\n운영 시간: 매일 10:00–22:00 KST\n${closed?'22:00–다음 날 10:00에는 좌석 현황을 갱신하지 않습니다.\n':''}좌석 배정 현황 기준이며, 도착 시 이용 가능 여부는 달라질 수 있습니다. 장애인석 1·3·44·85번과 리클라이너석 101·102번은 제외했습니다.\n<${LIBRARY_URL}>`;
- return {watch,key,content,closed};
+ return {watch,key:`card-v1:${key}`,content,closed};
 }
 async function blockedPost(env:Env,guild:string,channel:string){
  return !!await env.DB.prepare("SELECT guild_id FROM library_board_state WHERE guild_id=? AND channel_id=? AND post_state='uncertain' UNION ALL SELECT guild_id FROM deliveries WHERE guild_id=? AND channel_id=? AND id LIKE 'library:%' AND state IN ('sending','uncertain') LIMIT 1").bind(guild,channel,guild,channel).first();
@@ -69,7 +70,7 @@ async function post(env:Env,guild:string,channel:string,writer:Writer,p:Projecti
  if(!current||current.closed||!stillOwned||(!silent&&current.watch?.event_id!==id)||expiresAt<=nowIso()||!libraryWindow()){
   await expire();return;
  }
- const input={content:current.content,suppressNotifications:silent};
+ const input={...libraryCard(current.content),suppressNotifications:silent};
  const result=await discordSend(env,channel,input);
  if(result.state==='sent'){
   try{await recordLibraryMessage(env,guild,channel,result.messageId!,id,{owner:writer.lease_owner,key:current.key});}
@@ -87,7 +88,7 @@ async function post(env:Env,guild:string,channel:string,writer:Writer,p:Projecti
 async function patch(env:Env,guild:string,channel:string,id:string,content:string):Promise<'sent'|'missing'>{
  if(!env.DISCORD_TOKEN)throw new LibraryBoardRetry(900);
  let response:Response;
- try{response=await fetch(`https://discord.com/api/v10/channels/${channel}/messages/${id}`,{method:'PATCH',headers:{Authorization:`Bot ${env.DISCORD_TOKEN}`,'Content-Type':'application/json'},body:JSON.stringify({...message(content),embeds:[],attachments:[]}),signal:AbortSignal.timeout(15000)});}
+ try{response=await fetch(`https://discord.com/api/v10/channels/${channel}/messages/${id}`,{method:'PATCH',headers:{Authorization:`Bot ${env.DISCORD_TOKEN}`,'Content-Type':'application/json'},body:JSON.stringify({...message(libraryCard(content)),content:null,embeds:[],attachments:[]}),signal:AbortSignal.timeout(15000)});}
  catch{throw new LibraryBoardRetry();}
  if(response.ok)return 'sent';
  if(response.status===404){try{if((await response.json() as {code?:unknown}).code===10008)return 'missing';}catch{/* Only exact Unknown Message permits recreation. */}}

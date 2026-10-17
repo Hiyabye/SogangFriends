@@ -17,6 +17,7 @@ async function observe(remaining:number,advance=0){vi.advanceTimersByTime(advanc
 function tracked(id='100'){db.sqlite.prepare('INSERT OR REPLACE INTO library_messages(guild_id,channel_id,message_id,updated_at) VALUES(?,?,?,?)').run(guild,channel,id,iso());}
 const api=()=>vi.mocked(fetch);
 const body=(index=0)=>JSON.parse(String(api().mock.calls[index][1]!.body));
+const cardText=(index=0)=>body(index).components[0].components[0].content as string;
 const sent=(id='200')=>Response.json({id,channel_id:channel});
 const methods=()=>api().mock.calls.map(call=>call[1]!.method);
 const count=(table:string)=>Number(db.sqlite.prepare(`SELECT COUNT(*) n FROM ${table}`).get()!.n);
@@ -33,26 +34,26 @@ describe('library live status projections',()=>{
   const send=vi.spyOn(discord,'discordSend');await observe(3);api().mockResolvedValue(sent());
   await updateLibraryBoard(db.env,guild,channel);await updateLibraryBoard(db.env,guild,channel);
   expect(send).toHaveBeenCalledExactlyOnceWith(db.env,channel,expect.objectContaining({suppressNotifications:true}));
-  expect(body()).toMatchObject({flags:4096,allowed_mentions:{parse:[]}});expect(body().content).toContain('잔여 3석');
+  expect(body()).toMatchObject({flags:32768|4096,allowed_mentions:{parse:[]}});expect(cardText()).toContain('잔여 3석');expect(body()).not.toHaveProperty('content');
   expect(track()!.message_id).toBe('200');expect(count('jobs')).toBe(0);expect(count('deliveries')).toBe(1);
   expect(state()).toMatchObject({lease_owner:null,post_state:null,error:null});
  });
  it('edits all nonopening observations including same-count timestamps without POSTs or history rows',async()=>{
   tracked();api().mockResolvedValue(new Response('{}'));await observe(3);
   for(const value of [3,3,2,0,0]){await observe(value,30_000);await updateLibraryBoard(db.env,guild,channel);}
-  expect(methods()).toEqual(['PATCH','PATCH','PATCH','PATCH','PATCH']);expect(body(4).content).toContain('잔여 0석');
-  expect(body(0).content).not.toBe(body(1).content);expect(body(4)).toMatchObject({allowed_mentions:{parse:[]},embeds:[],attachments:[]});expect(body(4).flags).toBeUndefined();
+  expect(methods()).toEqual(['PATCH','PATCH','PATCH','PATCH','PATCH']);expect(cardText(4)).toContain('잔여 0석');
+  expect(cardText(0)).not.toBe(cardText(1));expect(body(4)).toMatchObject({flags:32768,content:null,allowed_mentions:{parse:[]},embeds:[],attachments:[]});
   expect(count('jobs')).toBe(0);expect(count('deliveries')).toBe(0);
  });
  it('uses the latest persisted watch rather than a caller-captured snapshot',async()=>{
   tracked();await observe(3);await observe(5,30_000);api().mockResolvedValue(new Response('{}'));
-  await updateLibraryBoard(db.env,guild,channel);expect(body().content).toContain('잔여 5석');
+  await updateLibraryBoard(db.env,guild,channel);expect(cardText()).toContain('잔여 5석');
  });
  it('does not bootstrap over a pending opening and renders the latest count in its normal POST',async()=>{
   const event=await opening();await observe(4,30_000);
   await updateLibraryBoard(db.env,guild,channel);expect(fetch).not.toHaveBeenCalled();
   const send=vi.spyOn(discord,'discordSend');api().mockResolvedValue(sent());await sendLibraryOpening(db.env,event,event);
-  expect(methods()).toEqual(['POST']);expect(body().content).toContain('잔여 4석');expect(body()).not.toHaveProperty('flags');
+  expect(methods()).toEqual(['POST']);expect(cardText()).toContain('잔여 4석');expect(body().flags).toBe(32768);
   expect(send).toHaveBeenCalledWith(db.env,channel,expect.objectContaining({suppressNotifications:false}));
   expect(count('deliveries')).toBe(1);expect(track()!.message_id).toBe('200');
  });
@@ -171,20 +172,31 @@ describe('library board arbitration and failures',()=>{
   await observe(1,60_000);const event=String(db.sqlite.prepare('SELECT event_id FROM library_watches').get()!.event_id);
   await expect(sendLibraryOpening(db.env,event,event)).rejects.toMatchObject({retryAfter:60});expect(fetch).toHaveBeenCalledOnce();
   await observe(4,60_000);api().mockResolvedValueOnce(sent());await sendLibraryOpening(db.env,event,event);
-  expect(methods()).toEqual(['PATCH','POST']);expect(body(1).content).toContain('잔여 4석');
+  expect(methods()).toEqual(['PATCH','POST']);expect(cardText(1)).toContain('잔여 4석');
  });
  it('retries known-message network failures without creating a message',async()=>{
   tracked();await observe(3);await expect(updateLibraryBoard(db.env,guild,channel)).rejects.toMatchObject({retryAfter:60});
   await observe(4,60_000);api().mockResolvedValueOnce(new Response('{}'));await updateLibraryBoard(db.env,guild,channel);
-  expect(methods()).toEqual(['PATCH','PATCH']);expect(body(1).content).toContain('잔여 4석');expect(count('deliveries')).toBe(0);
+  expect(methods()).toEqual(['PATCH','PATCH']);expect(cardText(1)).toContain('잔여 4석');expect(count('deliveries')).toBe(0);
  });
 });
 
 describe('library closing and source/display health boundaries',()=>{
+ it('upgrades an unchanged legacy closed display in place without a replacement POST',async()=>{
+  tracked();await observe(3);const at=iso();
+  db.sqlite.prepare('INSERT INTO library_board_state(guild_id,channel_id,display_key,updated_at) VALUES(?,?,?,?)').run(guild,channel,`closed:2026-10-16:${at}`,at);
+  vi.setSystemTime(new Date('2026-10-16T13:00:00Z'));api().mockResolvedValue(new Response('{}'));
+  await closeLibraryBoards(db.env,Date.now());await closeLibraryBoards(db.env,Date.now());
+  expect(methods()).toEqual(['PATCH']);expect(track()!.message_id).toBe('100');expect(count('deliveries')).toBe(0);
+  expect(body()).toMatchObject({flags:32768,content:null,embeds:[],attachments:[],allowed_mentions:{parse:[]}});
+  expect(body().components[0]).toMatchObject({type:17,accent_color:0x5865f2});
+  expect(cardText()).toContain('### 133 로욜라 인벤툼 II 좌석 현황');expect(cardText()).toContain('[공식 좌석 현황](<');
+  expect(state().display_key).toBe(`card-v1:closed:2026-10-16:${at}`);
+ });
  it('closes at22 without source requests or POSTs and stays idempotent across midnight',async()=>{
   tracked();await observe(3);const fetcher=vi.spyOn(source,'fetchLibrarySnapshot');api().mockResolvedValue(new Response('{}'));
   vi.setSystemTime(new Date('2026-10-16T13:00:00Z'));await closeLibraryBoards(db.env,Date.now());
-  expect(body().content).toContain('좌석 확인 종료');expect(body().content).toContain('22:00–다음 날 10:00');expect(body().content).toContain('2026-10-16 10:00:00 KST');
+  expect(cardText()).toContain('좌석 확인 종료');expect(cardText()).toContain('22:00–다음 날 10:00');expect(cardText()).toContain('2026-10-16 10:00:00 KST');
   vi.setSystemTime(new Date('2026-10-16T15:00:00Z'));await closeLibraryBoards(db.env,Date.now());
   expect(methods()).toEqual(['PATCH']);expect(fetcher).not.toHaveBeenCalled();expect(count('jobs')).toBe(0);
  });
@@ -214,7 +226,7 @@ describe('library closing and source/display health boundaries',()=>{
   await closeLibraryBoards(db.env,Date.now());expect(state().error).toBeTruthy();
   vi.advanceTimersByTime(15*60_000);api().mockResolvedValue(new Response('{}'));await closeLibraryBoards(db.env,Date.now());
   vi.setSystemTime(new Date('2026-10-17T01:00:00Z'));await observe(4);await updateLibraryBoard(db.env,guild,channel);
-  expect(methods()).toEqual(['PATCH','PATCH','PATCH']);expect(body(2).content).not.toContain('좌석 확인 종료');expect(count('deliveries')).toBe(0);
+  expect(methods()).toEqual(['PATCH','PATCH','PATCH']);expect(cardText(2)).not.toContain('좌석 확인 종료');expect(count('deliveries')).toBe(0);
  });
  it('keeps source success when display fails and still edits before rejected Queue dispatch',async()=>{
   tracked();const fetcher=vi.spyOn(source,'fetchLibrarySnapshot').mockImplementation(async()=>snapshot(0));
