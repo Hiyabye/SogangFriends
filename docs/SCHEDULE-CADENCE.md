@@ -1,14 +1,18 @@
 # Scheduled work and cadence
 
-## Approved local changes — rollout pending
+## Approved cadence — deployed2026-10-17
 
 The2026-10-17 user selected daily03:00 meal discovery, focused meal refresh,
 and OCR one hour earlier, then superseded daytime/nighttime schedule refresh
 with **once daily07:30** and selected hourly retention with quarter-hour recovery.
 The user explicitly approved pushing and deploying all these changes, while
-keeping archive backfill running. Rollout evidence is recorded below when done;
-until then production remains `cce5431c-88ae-448a-8d64-904d57ef91c9`.
-No schema/dependency changes or manual collector dispatch are needed.
+keeping archive backfill running. Commit `e542742` (including prior `d6533ed`)
+was pushed and deployed as Worker `6e806e47-8d01-4f78-bc64-afa3f8306342` around
+10:31 KST. No migrations were pending; production remains0001–0018. CI
+`38991192857` passed. Both Cron triggers and Queue bindings were preserved.
+No schema/dependency change, manual collector dispatch or test message occurred.
+Future scheduled observations must verify the new daily/hourly cadence and
+actual savings; deployment/CI success alone does not establish either.
 
 All times below are KST; Cron expressions in configuration are UTC.
 
@@ -18,7 +22,7 @@ The two triggers stay `*/15 * * * *` (ordinary work) and `* 1-12 * * *`
 (library minute work). Reduce planned work, not trigger frequency: quarter-hour
 recovery and22:00 library closure must continue independently of board cadence.
 
-| Work | Local selected cadence | Notes |
+| Work | Selected cadence | Notes |
 | --- | --- | --- |
 | Meal metadata discovery |03:00 only |Daily `meal-discover:daily:<date>` identity. Duplicate ticks deduplicate. No missed-tick catch-up; existing legacy jobs remain valid. Actions independently discovers sources too. |
 | Morning meal report |07:00 |Today's breakfast+dinner; unchanged15-minute creation window. |
@@ -43,7 +47,7 @@ are code-derived estimates, not measured billing savings.
 
 ## GitHub Actions
 
-| Workflow | Local schedule | Behavior |
+| Workflow | Schedule | Behavior |
 | --- | --- | --- |
 | Recent notices |03:10/09:10/15:10/21:10 |Unchanged;24 official sources. |
 | Archive backfill |03:40/09:40/15:40/21:40 |Unchanged. When enabled, also runs recent collection before bounded historical traversal. |
