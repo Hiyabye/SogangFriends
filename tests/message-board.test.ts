@@ -220,14 +220,14 @@ describe('change-driven persistent boards',()=>{
   await expect(executeJob(db.env,children[0])).rejects.toBeInstanceOf(BoardRetry);await executeJob(db.env,children[1]);
   expect(network).toHaveBeenCalledTimes(2);expect(db.sqlite.prepare("SELECT message_id FROM meal_messages WHERE guild_id='222'").get()!.message_id).toBe('777');
  });
- it('polls every 15 minutes but does not bootstrap new boards outside their approved windows',async()=>{
+ it('refreshes existing meal boards hourly outside focused periods without bootstrapping or periodic schedule work',async()=>{
   vi.setSystemTime(new Date('2026-10-13T02:00:00Z'));seed();const network=vi.spyOn(globalThis,'fetch').mockResolvedValue(sent());await planCron(db.env,Date.now());
   expect(db.sqlite.prepare("SELECT kind FROM jobs WHERE kind IN ('meal-refresh','schedule-refresh')").all()).toEqual([]);
   const refreshes=db.sqlite.prepare("SELECT * FROM jobs WHERE kind IN ('meal-board','schedule-summary') ORDER BY kind").all() as unknown as Job[];
-  expect(refreshes.map(job=>job.kind)).toEqual(['meal-board','schedule-summary']);
-  expect(refreshes.map(job=>JSON.parse(job.payload).allowCreate)).toEqual([false,false]);
+  expect(refreshes.map(job=>job.kind)).toEqual(['meal-board']);
+  expect(refreshes.map(job=>JSON.parse(job.payload).allowCreate)).toEqual([false]);
   await executeJob(db.env,{id:'stale-slot',kind:'meal-report',payload:JSON.stringify({date:'2026-10-13',mealSlot:'morning'})} as Job);
-  const children=db.sqlite.prepare("SELECT * FROM jobs WHERE kind IN ('meal-board','schedule-summary')").all() as unknown as Job[];expect(children).toHaveLength(3);
+  const children=db.sqlite.prepare("SELECT * FROM jobs WHERE kind IN ('meal-board','schedule-summary')").all() as unknown as Job[];expect(children).toHaveLength(2);
   for(const child of children)await executeJob(db.env,child);
   expect(network).not.toHaveBeenCalled();expect(db.sqlite.prepare('SELECT COUNT(*) n FROM meal_messages').get()!.n).toBe(0);expect(db.sqlite.prepare('SELECT COUNT(*) n FROM schedule_messages').get()!.n).toBe(0);
  });

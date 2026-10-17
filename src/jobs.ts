@@ -99,14 +99,15 @@ export async function updateMealBoard(env:Env,guild:string,channel:string,allowC
  valid:()=>activeMealSlot()===slot,complete:()=>complete,render:async()=>mealCard(await mealReportResponse(env,date,slot,true,()=>{complete=false;}))});
 }
 export async function planCron(env:Env,scheduledTime:number) {
- await pruneMealContent(env);
  await recover(env);
+ const date=todayKst(new Date(scheduledTime));
+ const hhmm=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(scheduledTime));
+ const hourly=hhmm.endsWith(':00');
+ if(hourly)await pruneMealContent(env);
  const hours=Number(env.SOURCE_INTERVAL_HOURS??'6');
  const interval=(Number.isFinite(hours)&&hours>=1?hours:6)*3600_000;
  const slot=Math.floor(scheduledTime/interval);
  if(env.NOTICE_COLLECTION_MODE!=='external') for(const source of SOURCES) await enqueue(env,`collect:${source.id}:${slot}`,'collect',{source:source.id});
- const date=todayKst(new Date(scheduledTime));
- const hhmm=new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit',hour12:false}).format(new Date(scheduledTime));
  if(hhmm==='03:00')await enqueue(env,`meal-discover:daily:${date}`,'meal-discover',{});
  const target=/^([01]\d|2[0-3]):[0-5]\d$/.test(env.MEAL_TIME_KST??'')?env.MEAL_TIME_KST!:'07:30';
  // Only the current quarter-hour window; no replay of missed daily broadcasts after downtime.
@@ -120,10 +121,7 @@ export async function planCron(env:Env,scheduledTime:number) {
   if(mins(hhmm)>=mins(time)&&mins(hhmm)<mins(time)+15)for(const g of meals)await enqueue(env,`meal-board:meal-report:${date}:${mealSlot}:${g.id}:${g.channel}`,'meal-board',{guild:g.id,channel:g.channel,date,mealSlot,allowCreate:true});
  }
  const quarter=Math.floor(scheduledTime/(15*60_000));
- const hourly=hhmm.endsWith(':00');
- const scheduleRefresh=(hhmm>='10:00'&&hhmm<'22:00')||hourly;
  const mealRefresh=(hhmm>='07:00'&&hhmm<'10:00')||(hhmm>='17:30'&&hhmm<'20:00')||hourly;
- if(scheduleRefresh)for(const g of schedules)await enqueue(env,`schedule-summary:${g.id}:${g.channel}:${date}:schedule-refresh:${quarter}`,'schedule-summary',{guild:g.id,channel:g.channel,date,allowCreate:false});
  if(mealRefresh&&activeMealSlot(new Date(scheduledTime)))for(const g of meals)await enqueue(env,`meal-board:meal-refresh:${quarter}:${g.id}:${g.channel}`,'meal-board',{guild:g.id,channel:g.channel,date,allowCreate:false});
  await dispatch(env);
 }

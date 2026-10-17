@@ -1,5 +1,6 @@
 import {describe,it,expect,beforeEach,afterEach,vi} from 'vitest';
 import {testDatabase} from './helpers/db';
+import {planCron} from '../src/jobs';
 import {mealWindow,pruneMealContent,cacheMealSources,mealImageSource,type MealSource} from '../src/meal-cache';
 const source=(start='2026-10-12',end='2026-10-18',id='123',published='2026-10-08'):MealSource=>({url:`https://scc.sogang.ac.kr/front/cmsboardview.do?bbsConfigFK=1185&siteId=dormitory&pkid=${id}`,imageUrl:`https://scc.sogang.ac.kr/dataview/board/1185/${id}.jpg`,start,end,published});
 let db:ReturnType<typeof testDatabase>;
@@ -42,6 +43,25 @@ describe('bounded current/upcoming meal content',()=>{
   expect(db.sqlite.prepare('SELECT source_url FROM meal_sources ORDER BY source_url').all().map(r=>r.source_url)).toEqual(['current','next']);
   for(const [id] of periods){const payload=JSON.parse(String(db.sqlite.prepare('SELECT payload FROM jobs WHERE id=?').get(id)!.payload));expect(payload.key).toBe(id);expect(payload.rejectedExtraction.cacheKey).toBe(id);expect(payload.rejectedExtraction.reason).toBe('rejected');expect('data' in payload.rejectedExtraction).toBe(['current','next'].includes(id));}
   expect(db.sqlite.prepare('SELECT id,state,attempts,error FROM jobs ORDER BY id').all()).toEqual(jobs);expect(db.sqlite.prepare('SELECT * FROM llm_usage').all()).toEqual(ledger);expect(db.sqlite.prepare('SELECT * FROM notices').all()).toEqual(notice);
+ });
+ it.each([['00:00',true],['00:15',false],['00:30',false],['00:45',false],['01:00',true]])('recovers every Cron but prunes only hourly at scheduled KST %s',async(time,pruned)=>{
+  db.env.NOTICE_COLLECTION_MODE='external';
+  // Wall clock differs from scheduled time: pruning cadence follows the tick,
+  // while the retained weeks are still evaluated against the actual current day.
+  vi.setSystemTime(new Date('2026-10-12T01:15:00+09:00'));
+  db.sqlite.prepare('INSERT INTO meal_sources VALUES(?,?,?,?,?,?)').run('old','image','2026-10-01','2026-10-05','2026-10-11','at');
+  db.sqlite.prepare("INSERT INTO jobs(id,kind,payload,state,created_at,available_at) VALUES('expired-command','interaction',?,'done','2026-10-11T00:00:00Z','2026-10-11T00:00:00Z')").run(JSON.stringify({token:'fixture-token'}));
+  await planCron(db.env,Date.parse(`2026-10-12T${time}:00+09:00`));
+  expect(db.sqlite.prepare("SELECT payload,state FROM jobs WHERE id='expired-command'").get()).toMatchObject({payload:'{}',state:'done'});
+  expect(db.sqlite.prepare('SELECT COUNT(*) n FROM meal_sources').get()!.n).toBe(pruned?0:1);
+ });
+ it('catches up meal retention at the next hourly tick after a missed Monday boundary',async()=>{
+  db.env.NOTICE_COLLECTION_MODE='external';
+  db.sqlite.prepare('INSERT INTO meal_sources VALUES(?,?,?,?,?,?)').run('old','image','2026-10-01','2026-10-05','2026-10-11','at');
+  vi.setSystemTime(new Date('2026-10-12T00:15:00+09:00'));await planCron(db.env,Date.now());
+  expect(db.sqlite.prepare('SELECT COUNT(*) n FROM meal_sources').get()!.n).toBe(1);
+  vi.setSystemTime(new Date('2026-10-12T01:00:00+09:00'));await planCron(db.env,Date.now());
+  expect(db.sqlite.prepare('SELECT COUNT(*) n FROM meal_sources').get()!.n).toBe(0);
  });
  it('does not serve an expired source even before maintenance has pruned it',async()=>{
   db.sqlite.prepare('INSERT INTO meal_sources VALUES(?,?,?,?,?,?)').run('old','image','2026-10-01','2026-10-05','2026-10-11','at');
