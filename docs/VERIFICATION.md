@@ -1,4 +1,16 @@
-# Bellarmino notice addition — local verification, rollout pending
+# 2026-10-17 — Bellarmino notice rollout
+
+The user explicitly approved all proposed rollout actions after local implementation and supplied destination1560830969546809484.
+
+- Remote migration listing showed only0019 pending. Applied `0019_dormitory_channel.sql` successfully before deploying Worker **3ec61ffa-a693-4734-bcc4-fbd0c2e9ad1b** from79359d5, around10:52 KST. Readback reported no pending migrations (0001–0019 applied). Existing quarter-hour/library-minute triggers and Queue bindings were preserved.
+- Used the safely loaded local Discord token without logging its value. Before registration, Discord readback confirmed the five known guild commands and empty global scope. Channel ownership/type/effective View+Send validation passed for1560830969546809484 in guild1558118900347183374. Registered all five guild commands and read back `/setup dormitory`; global scope was untouched.
+- Revalidated destination before guarded D1 update of only `dormitory_channel` and `updated_at`. Compared every previous channel field against pre-change readback: all eight prior institution routes, meal/schedule/library and NULL fallback unchanged. Channel is configured in D1, not hard-coded.
+- Pushed00cfda9 (feature79359d5 plus workflow label update). Push CI **38992683896** passed. Explicitly dispatched collection **38992683909**, which succeeded in2m32s and accepted all26 source snapshots. No raw-capture failures were reported.
+- Independent D1 readback confirmed **all26 new snapshot jobs `done`, attempts1, errorNULL**. New sources initialized with27/28 notices and matching27/28 `notice_archive_raw` rows. Last-success/attempt: dormitoryNotice01:54:15.611 UTC; dormitoryAdmission01:55:01.399 UTC, both errorNULL. Query for dormitory `notice-alert` jobs returned no rows: initial baselines were silent. An initial read-only verification query used a nonexistent table name (`notice_originals`) and failed; corrected to the actual `notice_archive_raw` schema before reporting counts.
+- No test messages, baseline resets, history replay or backfill dispatch. No secrets/dependencies changed. New dormitory Discord delivery and client rendering, scheduled future polling and full-history retention remain unverified; do not equate silent baseline success with delivery proof.
+- Existing Actions warnings for forced Node24 execution of Node20-targeting checkout/setup-node and upcoming Ubuntu-latest migration remain nonfatal and unchanged.
+
+# Bellarmino notice addition — pre-rollout local verification
 
 - Added CMS sources `dormitoryNotice`/1181 and `dormitoryAdmission`/1182, one `dormitory` route and nullable migration0019. User-supplied intended channel `1560830969546809484` has not been validated or configured.
 - Read-only native Node collection used the existing pinned certificate verification and bounded/paced source transport with normal TLS. The first attempt exposed seven-row regular pagination on both boards; source-specific seven-row validation and regression coverage were added rather than weakening history checks.
