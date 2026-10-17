@@ -9,10 +9,11 @@ It does not change confirmed `library_messages`, watch baselines or delivery/job
 history. With fresh explicit approval, migration0018 was applied before deploying
 Worker `def0ee15-1925-4be8-b403-9c0344c28f3f` from `70765fb` and pushing main on
 2026-10-17 around00:49 UTC (09:49 KST). Production has migrations0001–0018.
-Future external actions still need approval. Live minute editing, bootstrap,
-opening replacement and operating boundaries await natural scheduled verification.
+Future external actions still need approval. The natural10:00 KST poll and
+in-place Components V2 PATCH were confirmed by D1 and Discord API readback on
+2026-10-17. Bootstrap, opening replacement and22:00 remain unverified for this version.
 
-## Notice-style cards — local change, deployment pending
+## Notice-style cards — deployed
 
 `src/library-card.ts` presents the same durable text in a Components V2 container
 (type17, accent0x5865f2), with a heading and official-source link, matching notice
@@ -26,7 +27,16 @@ last closed observation is unchanged; subsequent closed updates stay idempotent.
 Discord's V2 flag cannot be removed from an upgraded message. A future rollback
 must retain a V2-compatible writer for those IDs rather than PATCH legacy text.
 See the official [Edit Message contract](https://docs.discord.com/developers/resources/message#edit-message).
-This presentation change is local only; production remains the version above.
+With explicit approval, pushed `ccab02c` and deployed Worker
+`cce5431c-88ae-448a-8d64-904d57ef91c9` on2026-10-17 around00:57 UTC (09:57 KST).
+No schema change, command registration or channel reconfiguration was needed.
+This is the current production version. Push CI38988679399 passed. At10:00 KST,
+the existing tracked message was automatically upgraded in place: flag32768,
+type17 container/type10 text, accent0x5865f2,43 remaining seats, source timestamp
+and official link, with no mentions or legacy embeds/attachments. D1 confirmed a
+silent new-day baseline (`event_id=NULL`) and `card-v1:` display proof. Discord
+API readback confirmed the same message ID, not a new POST; client rendering
+has not been visually checked.
 
 ## User-visible behavior
 
