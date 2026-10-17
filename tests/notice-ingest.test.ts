@@ -106,9 +106,9 @@ describe('authenticated notice ingestion',()=>{
    expect(db.sqlite.prepare('SELECT initialized FROM sources WHERE id=?').get('news')!.initialized).toBe(1);
   }finally{db.close();}
  });
- it('external mode does not schedule direct school fetches but retains meal planning',async()=>{
+ it('external mode does not schedule direct school fetches but retains daily03:00 meal discovery',async()=>{
   const db=database();try {
-   await planCron(db.env,Date.parse('2026-10-09T14:45:00Z'));
+   await planCron(db.env,Date.parse('2026-10-09T18:00:00Z'));
    expect(db.sqlite.prepare("SELECT COUNT(*) AS n FROM jobs WHERE kind='collect'").get()!.n).toBe(0);
    expect(db.sqlite.prepare("SELECT COUNT(*) AS n FROM jobs WHERE kind='meal-discover'").get()!.n).toBe(1);
   }finally{db.close();}

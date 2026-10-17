@@ -112,11 +112,11 @@ describe('interaction and durable integration',()=>{
    const health=db.sqlite.prepare("SELECT last_attempt,last_success,error FROM health WHERE id='cron'").get()!;
    expect(health.last_attempt).toBeTruthy();expect(health.last_success).toBeTruthy();expect(health.error).toBeNull();
    expect(db.sqlite.prepare("SELECT COUNT(*) AS n FROM jobs WHERE kind='collect'").get()!.n).toBe(SOURCES.length);
-   expect(db.sqlite.prepare("SELECT COUNT(*) AS n FROM jobs WHERE kind='meal-discover'").get()!.n).toBe(1);
-   expect(db.env.JOBS.send).toHaveBeenCalledTimes(SOURCES.length+1);
+   expect(db.sqlite.prepare("SELECT COUNT(*) AS n FROM jobs WHERE kind='meal-discover'").get()!.n).toBe(0);
+   expect(db.env.JOBS.send).toHaveBeenCalledTimes(SOURCES.length);
    expect(db.sqlite.prepare("SELECT COUNT(*) AS n FROM jobs WHERE kind IN ('meal-refresh','schedule-refresh','meal-board','schedule-summary')").get()!.n).toBe(0);
    await worker.scheduled(event,db.env);
-   expect(db.sqlite.prepare('SELECT COUNT(*) AS n FROM jobs').get()!.n).toBe(SOURCES.length+1);
+   expect(db.sqlite.prepare('SELECT COUNT(*) AS n FROM jobs').get()!.n).toBe(SOURCES.length);
   } finally {db.close();}
  });
  it('discovers source metadata but never plans inference even with stale legacy settings',async()=>{
