@@ -1,14 +1,16 @@
 # Library live status board
 
-## Local implementation — deployment pending
+## Deployed implementation
 
 The approved feature adds silent live-status editing to the existing opening
 alerts. Migration `0018_library_live_board.sql` adds `library_board_state` for
 shared writer ownership, POST uncertainty, cooldown and confirmed display keys.
 It does not change confirmed `library_messages`, watch baselines or delivery/job
-history. Production still runs Worker `a78d19fc-2a5c-4c34-8019-72291f476e91` with
-migrations0001–0017; applying0018 remotely, deployment and push need fresh approval.
-Apply0018 before deploying this code, including its `/status` query.
+history. With fresh explicit approval, migration0018 was applied before deploying
+Worker `def0ee15-1925-4be8-b403-9c0344c28f3f` from `70765fb` and pushing main on
+2026-10-17 around00:49 UTC (09:49 KST). Production has migrations0001–0018.
+Future external actions still need approval. Live minute editing, bootstrap,
+opening replacement and operating boundaries await natural scheduled verification.
 
 ## User-visible behavior
 

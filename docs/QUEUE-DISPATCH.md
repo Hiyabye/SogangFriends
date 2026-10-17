@@ -4,8 +4,12 @@
 
 Migration `0017_job_dispatch_lease.sql` adds nullable `jobs.dispatch_until` and was
 applied before deploying Worker `a78d19fc-2a5c-4c34-8019-72291f476e91` from
-`5a93604`. Production has migrations0001–0017. Local library live-board migration0018
-is pending separately; see [library contract](LIBRARY-BOARD.md). Future rollouts
+`5a93604`. The subsequent approved [library rollout](LIBRARY-BOARD.md) applied0018
+and deployed Worker `def0ee15-1925-4be8-b403-9c0344c28f3f` from `70765fb`.
+Production has migrations0001–0018. On2026-10-17 at00:49 UTC, Cron health was clear,
+all ten jobs created since00:00 were done, and no pending/retry/running jobs remained.
+Queue analytics reported833 operations since00:00 (282 writes,282 reads,269 deletes).
+This verifies resumed processing after reset, not comparable full-day savings. Future rollouts
 still need approval. Dispatch, execution claims and retry updates require this
 column; old explicit-column inserts remain compatible with the additive column.
 No baselines, job history, destinations or Discord messages were reset or replayed.
