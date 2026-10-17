@@ -23,7 +23,9 @@ export const ADDITIONAL_NOTICE_SOURCES:Source[]=[
  {id:'conveduNews',name:'융합교육원 센터소식',kind:'cms',url:'https://convedu.sogang.ac.kr/front/cmsboardlist.do?siteId=convedu&bbsConfigFK=5550'},
  {id:'bdataNotice',name:'빅데이터 융복합 인재양성사업단 공지사항',kind:'legacy',url:'https://sc.sogang.ac.kr/bdata/4305.html'},
  {id:'bdataNews',name:'빅데이터 융복합 인재양성사업단 News',kind:'legacy',url:'https://sc.sogang.ac.kr/bdata/4306.html'},
- {id:'psychologyNotice',name:'심리학과 공지사항',kind:'cms',url:'https://psychology.sogang.ac.kr/front/cmsboardlist.do?siteId=psychology&bbsConfigFK=1002'}
+ {id:'psychologyNotice',name:'심리학과 공지사항',kind:'cms',url:'https://psychology.sogang.ac.kr/front/cmsboardlist.do?siteId=psychology&bbsConfigFK=1002'},
+ {id:'dormitoryNotice',name:'벨라르미노 학사 공지 사항',kind:'cms',url:'https://scc.sogang.ac.kr/front/cmsboardlist.do?siteId=dormitory&bbsConfigFK=1181'},
+ {id:'dormitoryAdmission',name:'벨라르미노 학사 입퇴사 공지',kind:'cms',url:'https://scc.sogang.ac.kr/front/cmsboardlist.do?siteId=dormitory&bbsConfigFK=1182'}
 ];
 const legacyBoardId=(source:Source)=>source.id==='bdataNews'?'5255':'5256';
 function known(source:Source):void{if(!ADDITIONAL_NOTICE_SOURCES.some(s=>s.id===source.id&&s.kind===source.kind&&s.url===source.url))throw new Error('Unknown legacy notice source');}
@@ -87,7 +89,8 @@ export function parseLegacyNoticePage(input:string,source:Source,page=1):LegacyN
   if(!Number.isSafeInteger(total)||total<1||Math.ceil(total/10)!==last||regularIds.length!==Math.min(10,total-(page-1)*10))throw new Error('Conflicting legacy history coverage');
   return {notices,regularIds,regularCount:regularIds.length,done:page===last};
  }
- const size=source.id==='sweduNotice'||source.id==='sweduNews'||source.id==='sweduPress'?15:10;
+ // Dormitory CMS boards expose seven regular rows per page, excluding repeated pins.
+ const size=source.id==='sweduNotice'||source.id==='sweduNews'||source.id==='sweduPress'?15:source.id==='dormitoryNotice'||source.id==='dormitoryAdmission'?7:10;
  if(ordinals.some((n,i)=>!Number.isSafeInteger(n)||n<1||(i>0&&n!==ordinals[i-1]-1))||regularIds.length>size||!regularIds.length||(page<last&&regularIds.length!==size)||(page===last&&!ordinals.includes(1)))throw new Error('Conflicting legacy history coverage');
  return {notices,regularIds,regularCount:regularIds.length,done:page===last};
 }

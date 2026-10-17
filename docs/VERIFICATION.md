@@ -1,3 +1,12 @@
+# Bellarmino notice addition — local verification, rollout pending
+
+- Added CMS sources `dormitoryNotice`/1181 and `dormitoryAdmission`/1182, one `dormitory` route and nullable migration0019. User-supplied intended channel `1560830969546809484` has not been validated or configured.
+- Read-only native Node collection used the existing pinned certificate verification and bounded/paced source transport with normal TLS. The first attempt exposed seven-row regular pagination on both boards; source-specific seven-row validation and regression coverage were added rather than weakening history checks.
+- Repeated integrated recent collection succeeded with27 notices for1181 and28 for1182 (three pages each, pins deduplicated). Detail parsing succeeded for first/last collected notices:1181 IDs941628/865053 (98,498/157 original HTML bytes,0/1 attachments);1182 IDs939960/841661 (1,291/1,605 bytes,4/0 image references). No attachment/image binaries were downloaded. Final pages19/40 parsed with `done=true`; this is not full-history traversal.
+- `npm run check` passed: TypeScript,742 Vitest tests across33 files and14 standalone Node OCR-client tests. Fixture databases apply every local migration, including0019; remote D1 was untouched.
+- `WRANGLER_SEND_METRICS=false ./node_modules/.bin/wrangler deploy --dry-run --outdir /tmp/sogang-dormitory-build` passed; no deployment. Native Node command-definition import returned5 commands; no registration. `git diff --check` passed. Independent scoped review reran171 relevant tests successfully with no correctness findings.
+- No push, remote migration, deployment, command registration, channel configuration, snapshot ingestion, workflow dispatch or Discord send occurred. Production remains24 boards/eight routes, migrations0001–0018. Silent production baselines and new-route delivery remain unverified.
+
 # Verification record — 2026-10-09
 
 Executed locally:

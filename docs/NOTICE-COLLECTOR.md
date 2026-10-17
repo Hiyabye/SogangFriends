@@ -40,7 +40,7 @@ Official sources → Node → HMAC /internal/notices → D1 snapshot job → Que
 
 The collector needs no Discord, model or Cloudflare account API token and sends no Discord messages directly. First successful collection establishes a silent baseline; stable official IDs suppress duplicate/reordered/pinned posts. Later title/link updates do not become new alerts. A source failure does not stop healthy sources, but makes the run fail. A raw-capture failure likewise reports failure without suppressing an otherwise valid recent snapshot.
 
-The six university lists use official JSON; the remaining eighteen sources are HTML. Big-data wrappers `4305` and `4306` embed WebSTYLIST boards `bbsid=5256` (notices) and `bbsid=5255` (photo-style News); wrapper IDs are not article IDs. Photo News validates page counts against its advertised total rather than table-row ordinals. Recent polling is bounded to **50 rows per university board** and **three pages per HTML board** (15 regular rows/page for SW boards, 10 for the others), not full-history traversal.
+The six university lists use official JSON; production's remaining eighteen sources are HTML. The pending Bellarmino addition brings the local catalog to twenty-six sources (twenty HTML). Big-data wrappers `4305` and `4306` embed WebSTYLIST boards `bbsid=5256` (notices) and `bbsid=5255` (photo-style News); wrapper IDs are not article IDs. Photo News validates page counts against its advertised total rather than table-row ordinals. Recent polling is bounded to **50 rows per university board** and **three pages per HTML board** (15 regular rows/page for SW boards, 7 for the pending Bellarmino boards, 10 for the others), not full-history traversal.
 
 Node uses one scoped, verified public intermediate to fix the official site's incomplete certificate chain. Never disable TLS or add unrelated trust material; see [certificate provenance](../certificates/README.md). There is no dependency on reference repositories' code, feeds or infrastructure.
 
@@ -55,6 +55,21 @@ Read-only native Node checks collected36/23/5/30 recent entries from General/Rec
 Deployed migration `0012_engineering_channel.sql` adds nullable `guilds.engineering_channel`; registered `/setup engineering` follows the existing institution validation and override/fallback rules. A guarded D1 update changed only the Engineering destination and update timestamp; readback confirmed the five old institution routes, meal/schedule settings and NULL fallback unchanged. The initial live collection retained36/23/5/30 notices and originals for General/Recruitment/Academic/Research. All four sources are initialized with no errors; no Engineering delivery intents were created.
 
 This expansion required schema and command-definition changes: migration0012 preceded Worker deployment, then guild command registration and channel validation/configuration preceded collector push. The five known guild commands were replaced and read back; the empty global scope was untouched. No historical backfill was started/dispatched. Future external changes require fresh approval. New Engineering Discord delivery and visual rendering remain unverified; silent baselines are not delivery proof.
+
+## Bellarmino dormitory expansion — local only, pending rollout
+
+The local catalog adds two official CMS boards under one `dormitory` route (벨라르미노 학사):
+
+| Source ID | Official list |
+|---|---|
+| `dormitoryNotice` | <https://scc.sogang.ac.kr/front/cmsboardlist.do?siteId=dormitory&bbsConfigFK=1181> — 공지 사항 |
+| `dormitoryAdmission` | <https://scc.sogang.ac.kr/front/cmsboardlist.do?siteId=dormitory&bbsConfigFK=1182> — 입퇴사 공지 |
+
+The user selected one shared destination and supplied channel `1560830969546809484`. It is an intended destination only: ownership/type/effective permissions and D1 configuration remain unverified. Do not hard-code it in source definitions.
+
+Migration `0019_dormitory_channel.sql` adds nullable `guilds.dormitory_channel`; `/setup dormitory` and `/status` use the existing group-driven configuration. Other routes, NULL fallback, existing baselines and archive cursors remain unchanged. Initial collection establishes silent baselines, never replays historical alerts. Both boards use **seven regular rows/page**, excluding repeated pins; recent collection still stops after three HTML pages. Existing source-bound CMS identity, canonical detail links, raw archival and backfill validation apply.
+
+Before any rollout, obtain explicit approval for the relevant external actions. Apply migration0019 before the compatible Worker, then register the updated command catalog and validate/configure the channel **before pushing the collector catalog**. Existing workflows consume the shared catalog, so a push is not merely a documentation change. No remote migration, push, deployment, command registration, channel configuration, ingestion or historical traversal has been performed for this addition. Production remains twenty-four boards/eight routes until separately verified.
 
 ## Psychology and Business expansion — deployed
 

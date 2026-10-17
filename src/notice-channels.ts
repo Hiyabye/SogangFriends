@@ -7,11 +7,12 @@ export const NOTICE_GROUPS = [
  {id:'engineering',name:'공과대학',sources:['engineeringNotice','engineeringRecruit','engineeringAcademic','engineeringResearch']},
  {id:'psychology',name:'심리학과',sources:['psychologyNotice']},
  {id:'business',name:'경영학과',sources:['businessNotice']},
+ {id:'dormitory',name:'벨라르미노 학사',sources:['dormitoryNotice','dormitoryAdmission']},
 ] as const;
 export const NOTICE_CHANNEL_COLUMNS = {
  university:'university_channel',computing:'computing_channel',swedu:'swedu_channel',
  convedu:'convedu_channel',bdata:'bdata_channel',engineering:'engineering_channel',
- psychology:'psychology_channel',business:'business_channel',
+ psychology:'psychology_channel',business:'business_channel',dormitory:'dormitory_channel',
 } as const;
 export function noticeChannelColumn(source:string) {
  const group=NOTICE_GROUPS.find(group=>(group.sources as readonly string[]).includes(source));

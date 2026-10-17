@@ -32,6 +32,23 @@ describe('additional official notice boards',()=>{
   expect(validateNoticeSnapshot({source:s.id,notices:result.notices}).notices).toEqual(result.notices);
   for(const n of result.notices){expect(n.url).toBe(noticeDetailUrl(s,n.id));for(const url of [n.url.replace('https:','http:'),n.url+'&currentPage=1',n.url.replace('pkid=','other=')])expect(()=>validateNoticeSnapshot({source:s.id,notices:[{...n,url}]})).toThrow();}
  });
+ it.each([['dormitoryNotice','1181'],['dormitoryAdmission','1182']])('binds %s list, raw archive and snapshots to its own dormitory board', (id,config)=>{
+  const source=ADDITIONAL_NOTICE_SOURCES.find(source=>source.id===id)!;
+  expect(source).toMatchObject({id,kind:'cms',url:`https://scc.sogang.ac.kr/front/cmsboardlist.do?siteId=dormitory&bbsConfigFK=${config}`});
+  const canonical=`https://scc.sogang.ac.kr/front/cmsboardview.do?bbsConfigFK=${config}&siteId=dormitory&pkid=900`;
+  const notice=parseNoticePage(page(source),source,1).notices.find(notice=>notice.id==='900')!;
+  expect(notice.url).toBe(canonical);
+  expect(parseNoticeRaw(detail(source),notice).bodyHtml).toContain('data-original="yes"');
+  expect(parseLegacyNoticePage(page(source,1,2,7),source,1)).toMatchObject({regularCount:7,done:false});
+  expect(parseNoticePage(page(source,2,2,1,false),source,2).done).toBe(true);
+  for(const count of [6,8,10])expect(()=>parseNoticePage(page(source,1,2,count),source,1)).toThrow('coverage');
+  const other=config==='1181'?'1182':'1181';
+  expect(()=>parseNoticePage(page(source).replace(`name="bbsConfigFK" value="${config}"`,`name="bbsConfigFK" value="${other}"`),source,1)).toThrow('board/post');
+  expect(()=>parseNoticeRaw(detail(source).replace(`name="bbsConfigFK" value="${config}"`,`name="bbsConfigFK" value="${other}"`),notice)).toThrow('board/post');
+  expect(()=>parseNoticePage(page(source).replaceAll(`bbsConfigFK=${config}`,`bbsConfigFK=${other}`),source,1)).toThrow('link');
+  expect(()=>validateNoticeSnapshot({source:id,notices:[{...notice,url:canonical.replace(`bbsConfigFK=${config}`,`bbsConfigFK=${other}`)}]})).toThrow();
+  expect(()=>parseNoticeRaw(detail(source).replace('name="siteId" value="dormitory"','name="siteId" value="other"'),notice)).toThrow('board/post');
+ });
  it('recovers full CMS titles from encoded comments instead of archiving a truncated visible title',()=>{
   const s=ADDITIONAL_NOTICE_SOURCES[2];const html=page(s).replace('Notice 900','<!-- AI &#39RADAI&#39 &amp; future <research> full title -->AI ...');const notice=parseNoticePage(html,s,1).notices.find(n=>n.id==='900')!;
   expect(notice.title).toBe("AI 'RADAI' & future <research> full title");expect(parseNoticeRaw(detail(s).replace('Notice 900',"AI 'RADAI' &amp; future &lt;research&gt; full title"),notice).bodyHtml).toContain('Body');
@@ -44,7 +61,7 @@ describe('additional official notice boards',()=>{
   expect(()=>parseNoticePage(html.replace('pkid=899','pkid=900'),s,1)).toThrow('Duplicate');
   expect(()=>parseNoticePage(html.replace('pkid=900',s.kind==='cms'?'pkid=900&siteId=other':'pkid=900&bbsid=other'),s,1)).toThrow();
   expect(()=>parseNoticePage(page(s,1,2,1,false),s,1)).toThrow('coverage');
-  const size=s.id.startsWith('swedu')?15:10;expect(parseLegacyNoticePage(page(s,1,2,size),s).done).toBe(false);
+  const size=s.id.startsWith('swedu')?15:s.id.startsWith('dormitory')?7:10;expect(parseLegacyNoticePage(page(s,1,2,size),s).done).toBe(false);
   expect(parseLegacyNoticePage(page(s,2,2,1,false),s,2).done).toBe(true);
  });
  it.each(ADDITIONAL_NOTICE_SOURCES)('archives $id original HTML and attachment/image URLs with detail evidence',s=>{
@@ -101,7 +118,7 @@ describe('additional official notice boards',()=>{
  });
  it('uses the shared bounded, paced transport for recent collection and raw/backfill without uploads',async()=>{
   vi.useFakeTimers();vi.setSystemTime(new Date('2026-10-13T00:00:00Z'));vi.resetModules();const sources=await import('../src/sources');const archive=await import('../src/notice-archive-sources');
-  const starts:number[]=[];const fetcher=vi.fn(async(value:unknown,options?:RequestInit)=>{expect(options?.redirect).toBe('manual');starts.push(Date.now());const u=new URL(String(value));const s=ADDITIONAL_NOTICE_SOURCES.find(s=>new URL(legacyNoticePageUrl(s,1)).origin===u.origin&&(s.kind==='legacy'?new URL(legacyNoticePageUrl(s,1)).searchParams.get('bbsid')===u.searchParams.get('bbsid'):new URL(s.url).searchParams.get('bbsConfigFK')===u.searchParams.get('bbsConfigFK')))!;const p=Number(u.searchParams.get('currentPage')??1);return new Response(u.pathname.endsWith('view.do')?detail(s):page(s,p,2,p===1?(s.id.startsWith('swedu')?15:10):2),{headers:{'content-type':'text/html;charset=utf-8'}});});vi.stubGlobal('fetch',fetcher);
+  const starts:number[]=[];const fetcher=vi.fn(async(value:unknown,options?:RequestInit)=>{expect(options?.redirect).toBe('manual');starts.push(Date.now());const u=new URL(String(value));const s=ADDITIONAL_NOTICE_SOURCES.find(s=>new URL(legacyNoticePageUrl(s,1)).origin===u.origin&&(s.kind==='legacy'?new URL(legacyNoticePageUrl(s,1)).searchParams.get('bbsid')===u.searchParams.get('bbsid'):new URL(s.url).searchParams.get('bbsConfigFK')===u.searchParams.get('bbsConfigFK')))!;const p=Number(u.searchParams.get('currentPage')??1);return new Response(u.pathname.endsWith('view.do')?detail(s):page(s,p,2,p===1?(s.id.startsWith('swedu')?15:s.id.startsWith('dormitory')?7:10):2),{headers:{'content-type':'text/html;charset=utf-8'}});});vi.stubGlobal('fetch',fetcher);
   for(const s of ADDITIONAL_NOTICE_SOURCES){const pending=sources.collectNotices(s);await vi.runAllTimersAsync();const result=await pending;expect(result.filter(n=>n.id==='999')).toHaveLength(s.kind==='cms'?1:0);expect(result.find(n=>n.id==='800')).toBeTruthy();
    const p=archive.collectNoticePage(s,2);await vi.runAllTimersAsync();expect((await p).done).toBe(true);
    const n=result.find(n=>n.id==='900')!;const raw=archive.collectNoticeRaw(n);await vi.runAllTimersAsync();expect((await raw).bodyHtml).toContain('data-original="yes"');
